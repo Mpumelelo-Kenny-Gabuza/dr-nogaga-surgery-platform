@@ -30,7 +30,7 @@ versus what's still a placeholder route.
 |---|---|---|
 | 1 | Project foundation, routing, layouts, theme, base UI | **Done** |
 | 2 | Supabase schema, migrations, RLS, storage buckets | **Done** (this commit) |
-| 3 | Authentication & roles (ADMIN / EDITOR) | Not started |
+| 3 | Authentication & roles (ADMIN / EDITOR) | **Done** (this commit) |
 | 4 | Public website pages (real content, wired to Supabase) | Not started |
 | 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | Not started |
 | 6 | Consultation enquiry form + enquiry dashboard | Not started |
@@ -131,10 +131,60 @@ only. Public-read is deliberate: this app never stores real patient
 documents (§37 of the spec), so there's nothing in these buckets that
 needs to be private. Uploads/replaces/deletes are staff-only.
 
-## 10–14. Auth, seed data, local dev, production build, deployment, admin
-setup, security
+## 10. Authentication
 
-Documented as each remaining phase lands. Phase 3 (authentication) is next.
+Supabase Auth, email/password. `src/features/auth/`:
+
+- `AuthProvider.tsx` — tracks the current session + the matching `profiles`
+  row (name, role), kept in sync via `onAuthStateChange` so sign-in,
+  sign-out, and token refresh all just work, including across tabs.
+- `useAuth()` — `{ user, profile, isAdmin, isEditor, signIn, signOut }`.
+- `ProtectedRoute.tsx` — wraps every `/admin` route. Unauthenticated →
+  redirected to `/admin/login`. A session with no matching *active*
+  profile (e.g. a deactivated staff account) is treated the same way and
+  signed out, rather than left half-authenticated.
+
+Pages: `/admin/login`, `/admin/forgot-password`, `/admin/reset-password`
+(`src/pages/auth/`) — all three deliberately sit outside `ProtectedRoute`,
+since you're not signed in yet when you need them.
+
+**The frontend redirect is a UX convenience, not the real boundary** (spec
+§22). Every one of these checks is backed by the RLS policies from Phase 2
+— an EDITOR who edits the URL to reach `/admin/settings` directly still
+can't read or write anything there, because Postgres denies it regardless
+of what the UI renders.
+
+**Creating the first ADMIN** (there's no self-service signup, by design —
+spec §26):
+1. In the Supabase dashboard: Authentication → Users → Add user. Set an
+   email + password directly (skip the invite-email flow for this first
+   one).
+2. The `handle_new_user` trigger fires automatically and creates their
+   `profiles` row — as `EDITOR` by default.
+3. Promote them: in the SQL editor, `update public.profiles set role = 'ADMIN' where id = '<their user id, from the Users list>';`
+4. They can now sign in at `/admin/login` and will see the ADMIN-only
+   Settings nav item.
+
+Every account after that first one, an existing ADMIN creates and promotes
+the same way (a proper in-app "invite user" screen is Phase 5 — §26).
+
+**Password reset** needs one bit of Supabase dashboard config before it'll
+work: Authentication → URL Configuration → Redirect URLs — add
+`http://localhost:5173/admin/reset-password` for local dev, and your
+production URL once deployed. Without this, Supabase rejects the redirect
+and the reset email link won't work.
+
+**Verified**: `tsc --noEmit` and `npm run build` both pass clean with the
+full auth flow wired in. A live end-to-end sign-in test needs an actual
+Supabase project (this sandbox can reach npm and GitHub but not Supabase's
+API), so that's the one thing to manually click through once you've
+connected yours — sign in, sign out, try `/admin` while logged out, try a
+password reset. Automated tests for this flow are Phase 10's job per the
+spec's own phase breakdown (§43/§46).
+
+## 11–14. Seed data, local dev, production build & deployment, security
+
+Documented as each remaining phase lands.
 
 ## Project Structure
 
@@ -150,8 +200,10 @@ src/
   pages/
     public/    (Phase 4)
     admin/     (Phase 5)
-    auth/      (Phase 3)
-  features/    one folder per domain feature, added as each is built
+    auth/      Login, ForgotPassword, ResetPassword, shared AuthPageShell
+  features/
+    auth/      AuthProvider, useAuth, ProtectedRoute
+    ...        one more folder per domain feature, added as each is built
   lib/
     supabase/
       client.ts          typed Supabase client (reads VITE_SUPABASE_* env vars)
