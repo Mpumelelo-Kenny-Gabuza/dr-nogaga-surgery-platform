@@ -3,6 +3,10 @@ import { PublicLayout } from "@/layouts/PublicLayout";
 import { AdminLayout } from "@/layouts/AdminLayout";
 import { Placeholder } from "@/pages/Placeholder";
 import { NotFound } from "@/pages/NotFound";
+import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
+import { Login } from "@/pages/auth/Login";
+import { ForgotPassword } from "@/pages/auth/ForgotPassword";
+import { ResetPassword } from "@/pages/auth/ResetPassword";
 
 export default function App() {
   return (
@@ -26,8 +30,14 @@ export default function App() {
         <Route path="/disclaimer" element={<Placeholder title="Medical Disclaimer" phase="Phase 9" />} />
       </Route>
 
-      {/* Admin — §19 (Phase 5), gated behind auth in Phase 3 */}
-      <Route element={<AdminLayout />}>
+      {/* Admin — §19 (Phase 5 content), gated behind real auth (Phase 3) */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <AdminLayout />
+          </ProtectedRoute>
+        }
+      >
         <Route path="/admin" element={<Placeholder title="Dashboard" phase="Phase 5 — CMS" />} />
         <Route path="/admin/content" element={<Placeholder title="Website Content" phase="Phase 5" />} />
         <Route path="/admin/about" element={<Placeholder title="About" phase="Phase 5" />} />
@@ -38,11 +48,18 @@ export default function App() {
         <Route path="/admin/testimonials" element={<Placeholder title="Testimonials" phase="Phase 5" />} />
         <Route path="/admin/faqs" element={<Placeholder title="FAQs" phase="Phase 5" />} />
         <Route path="/admin/enquiries" element={<Placeholder title="Enquiries" phase="Phase 6" />} />
+        {/* No route-level ADMIN-only gate here beyond the sidebar hiding it —
+            RLS is the real boundary (spec §22: never rely on frontend-only
+            protection), so an EDITOR who browses here directly still can't
+            read or write anything the Settings page would show. */}
         <Route path="/admin/settings" element={<Placeholder title="Settings" phase="Phase 5" />} />
       </Route>
 
-      {/* Auth — §22/23 (Phase 3), intentionally outside both layouts */}
-      <Route path="/admin/login" element={<Placeholder title="Admin Login" phase="Phase 3 — authentication" />} />
+      {/* Auth — §22/23. Deliberately outside ProtectedRoute: you're not
+          signed in yet when you need these. */}
+      <Route path="/admin/login" element={<Login />} />
+      <Route path="/admin/forgot-password" element={<ForgotPassword />} />
+      <Route path="/admin/reset-password" element={<ResetPassword />} />
 
       <Route path="*" element={<NotFound />} />
     </Routes>
