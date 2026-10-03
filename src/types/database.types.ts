@@ -194,6 +194,7 @@ export type Database = {
       };
       enquiries: {
         Row: {
+          appointment_type: Database["public"]["Enums"]["appointment_type"];
           area_of_enquiry: string | null;
           consent: boolean;
           created_at: string;
@@ -202,6 +203,7 @@ export type Database = {
           id: string;
           message: string | null;
           phone: string;
+          practice_location_id: string | null;
           preferred_contact_method: Database["public"]["Enums"]["preferred_contact_method"];
           preferred_date: string | null;
           reference: string;
@@ -210,6 +212,7 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          appointment_type?: Database["public"]["Enums"]["appointment_type"];
           area_of_enquiry?: string | null;
           consent?: boolean;
           created_at?: string;
@@ -218,6 +221,7 @@ export type Database = {
           id?: string;
           message?: string | null;
           phone: string;
+          practice_location_id?: string | null;
           preferred_contact_method?: Database["public"]["Enums"]["preferred_contact_method"];
           preferred_date?: string | null;
           reference: string;
@@ -226,6 +230,7 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          appointment_type?: Database["public"]["Enums"]["appointment_type"];
           area_of_enquiry?: string | null;
           consent?: boolean;
           created_at?: string;
@@ -234,6 +239,7 @@ export type Database = {
           id?: string;
           message?: string | null;
           phone?: string;
+          practice_location_id?: string | null;
           preferred_contact_method?: Database["public"]["Enums"]["preferred_contact_method"];
           preferred_date?: string | null;
           reference?: string;
@@ -241,7 +247,15 @@ export type Database = {
           surname?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "enquiries_practice_location_id_fkey";
+            columns: ["practice_location_id"];
+            isOneToOne: false;
+            referencedRelation: "practice_locations";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       enquiry_notes: {
         Row: {
@@ -360,6 +374,7 @@ export type Database = {
           hero_cta_secondary_label: string | null;
           hero_cta_secondary_url: string | null;
           hero_image_url: string | null;
+          hero_kicker: string | null;
           hero_text: string | null;
           hero_title: string | null;
           id: boolean;
@@ -378,6 +393,7 @@ export type Database = {
           hero_cta_secondary_label?: string | null;
           hero_cta_secondary_url?: string | null;
           hero_image_url?: string | null;
+          hero_kicker?: string | null;
           hero_text?: string | null;
           hero_title?: string | null;
           id?: boolean;
@@ -396,6 +412,7 @@ export type Database = {
           hero_cta_secondary_label?: string | null;
           hero_cta_secondary_url?: string | null;
           hero_image_url?: string | null;
+          hero_kicker?: string | null;
           hero_text?: string | null;
           hero_title?: string | null;
           id?: boolean;
@@ -644,6 +661,48 @@ export type Database = {
           },
         ];
       };
+      practice_locations: {
+        Row: {
+          address: string | null;
+          created_at: string;
+          display_name: string;
+          display_order: number;
+          id: string;
+          is_physical: boolean;
+          landline: string | null;
+          published: boolean;
+          slug: string;
+          updated_at: string;
+          whatsapp: string | null;
+        };
+        Insert: {
+          address?: string | null;
+          created_at?: string;
+          display_name: string;
+          display_order?: number;
+          id?: string;
+          is_physical?: boolean;
+          landline?: string | null;
+          published?: boolean;
+          slug: string;
+          updated_at?: string;
+          whatsapp?: string | null;
+        };
+        Update: {
+          address?: string | null;
+          created_at?: string;
+          display_name?: string;
+          display_order?: number;
+          id?: string;
+          is_physical?: boolean;
+          landline?: string | null;
+          published?: boolean;
+          slug?: string;
+          updated_at?: string;
+          whatsapp?: string | null;
+        };
+        Relationships: [];
+      };
       procedure_categories: {
         Row: {
           created_at: string;
@@ -843,6 +902,8 @@ export type Database = {
       site_settings: {
         Row: {
           address: string | null;
+          consultation_fee_cash: number | null;
+          consultation_fee_medical_aid: number | null;
           contact_email: string | null;
           contact_phone: string | null;
           contact_whatsapp: string | null;
@@ -858,6 +919,8 @@ export type Database = {
         };
         Insert: {
           address?: string | null;
+          consultation_fee_cash?: number | null;
+          consultation_fee_medical_aid?: number | null;
           contact_email?: string | null;
           contact_phone?: string | null;
           contact_whatsapp?: string | null;
@@ -873,6 +936,8 @@ export type Database = {
         };
         Update: {
           address?: string | null;
+          consultation_fee_cash?: number | null;
+          consultation_fee_medical_aid?: number | null;
           contact_email?: string | null;
           contact_phone?: string | null;
           contact_whatsapp?: string | null;
@@ -912,6 +977,42 @@ export type Database = {
           platform?: string;
           published?: boolean;
           url?: string;
+        };
+        Relationships: [];
+      };
+      team_members: {
+        Row: {
+          bio: string | null;
+          created_at: string;
+          display_order: number;
+          full_name: string;
+          id: string;
+          photo_url: string | null;
+          published: boolean;
+          role_title: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          bio?: string | null;
+          created_at?: string;
+          display_order?: number;
+          full_name: string;
+          id?: string;
+          photo_url?: string | null;
+          published?: boolean;
+          role_title?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          bio?: string | null;
+          created_at?: string;
+          display_order?: number;
+          full_name?: string;
+          id?: string;
+          photo_url?: string | null;
+          published?: boolean;
+          role_title?: string | null;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -974,6 +1075,14 @@ export type Database = {
       dearmor: { Args: { "": string }; Returns: string };
       gen_random_uuid: { Args: Record<PropertyKey, never>; Returns: string };
       gen_salt: { Args: { "": string }; Returns: string };
+      get_thursday_availability: {
+        Args: { from_date: string; to_date: string };
+        Returns: {
+          booked_count: number;
+          is_available: boolean;
+          slot_date: string;
+        }[];
+      };
       is_staff: { Args: Record<PropertyKey, never>; Returns: boolean };
       pgp_armor_headers: {
         Args: { "": string };
@@ -981,9 +1090,11 @@ export type Database = {
       };
     };
     Enums: {
+      appointment_type: "NEW_CONSULTATION" | "REVIEW_FOLLOWUP";
       comment_status: "PENDING" | "APPROVED" | "REJECTED" | "HIDDEN";
       content_status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
-      enquiry_status: "NEW" | "CONTACTED" | "CONSULTATION_BOOKED" | "CLOSED";
+      enquiry_status:
+        "NEW" | "CONTACTED" | "CONSULTATION_BOOKED" | "CLOSED" | "CANCELLED";
       preferred_contact_method: "WHATSAPP" | "PHONE" | "EMAIL";
       user_role: "ADMIN" | "EDITOR";
     };
@@ -1113,9 +1224,16 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      appointment_type: ["NEW_CONSULTATION", "REVIEW_FOLLOWUP"],
       comment_status: ["PENDING", "APPROVED", "REJECTED", "HIDDEN"],
       content_status: ["DRAFT", "PUBLISHED", "ARCHIVED"],
-      enquiry_status: ["NEW", "CONTACTED", "CONSULTATION_BOOKED", "CLOSED"],
+      enquiry_status: [
+        "NEW",
+        "CONTACTED",
+        "CONSULTATION_BOOKED",
+        "CLOSED",
+        "CANCELLED",
+      ],
       preferred_contact_method: ["WHATSAPP", "PHONE", "EMAIL"],
       user_role: ["ADMIN", "EDITOR"],
     },
