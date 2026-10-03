@@ -133,7 +133,17 @@ function Footer() {
             <Link to="/terms" className="hover:text-white">Terms</Link>
             <Link to="/disclaimer" className="hover:text-white">Medical Disclaimer</Link>
           </div>
-          <div className="flex gap-4"><Container className="text-mist/70">Developed by <a href="https://www.mlifi.co.za" target="_blank" rel="noopener noreferrer" className="hover:text-white">Mlifi Solutions</a></Container></div>
+          <span className="text-mist/70">
+            Developed by{" "}
+            <a
+              href="https://www.mlifi.co.za"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-white"
+            >
+              Mlifi Solutions
+            </a>
+          </span>
         </Container>
       </div>
     </footer>
