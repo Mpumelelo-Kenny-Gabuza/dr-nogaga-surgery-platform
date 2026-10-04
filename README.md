@@ -31,7 +31,7 @@ versus what's still a placeholder route.
 | 1 | Project foundation, routing, layouts, theme, base UI | **Done** |
 | 2 | Supabase schema, migrations, RLS, storage buckets | **Done** (this commit) |
 | 3 | Authentication & roles (ADMIN / EDITOR) | **Done** (this commit) |
-| 4 | Public website pages (real content, wired to Supabase) | Not started |
+| 4 | Public website pages (real content, wired to Supabase) | **Done** (this commit) |
 | 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | Not started |
 | 6 | Consultation enquiry form + enquiry dashboard | Not started |
 | 7 | Blog likes, comments, moderation, practice replies, sharing | Not started |
@@ -39,9 +39,26 @@ versus what's still a placeholder route.
 | 9 | SEO, sitemap, accessibility pass | Not started |
 | 10 | Responsive QA, final polish, documentation | Not started |
 
-Every route in the spec is wired up now and renders a labelled placeholder
-page — see `src/App.tsx` — so navigation and layout can be reviewed before
-real content is built on top of it.
+Every route in the spec is wired up — see `src/App.tsx`. Public pages
+(`/`, `/about`, `/procedures`, `/reconstructive-surgery`, `/resources`,
+`/gallery`, `/testimonials`, `/faq`, `/contact`) now render real data from
+Supabase. `/consultation`, `/privacy`, `/terms` and `/disclaimer` still
+render a labelled placeholder — those are Phase 6 and Phase 9 respectively.
+
+**What's genuinely live right now vs. still pending from the practice** —
+Phase 4 wires every page to the database honestly, which means a few
+sections currently render an explicit "not published yet" message instead
+of invented content, because the underlying rows really are empty or still
+marked `DRAFT`/unpublished:
+- **Live**: all 15 confirmed procedures, qualifications, practice locations
+  (East London, Mthatha, Virtual), consultation fees, homepage/intro copy.
+- **Pending the practice's content** (shows an honest empty/pending state,
+  not placeholder text): Dr Nogaga's biography and approach-to-patient-care
+  paragraphs, professional memberships/affiliations, team member profiles,
+  gallery images, blog/patient-resource articles, and testimonials — the
+  seed data for the last three exists but is deliberately left `DRAFT` (see
+  `20260930091000_seed_data.sql`'s own header) since it's fictional/demo
+  copy, not real content to publish.
 
 ## 4. Installation
 
@@ -75,7 +92,7 @@ Server-side-only operations go in Supabase Edge Functions (Phase 2).
 
 ## 7. Database Migrations
 
-All 11 migrations live in `supabase/migrations/`, applied in filename
+All 15 migrations live in `supabase/migrations/`, applied in filename
 (timestamp) order:
 
 | File | Covers |
@@ -91,6 +108,10 @@ All 11 migrations live in `supabase/migrations/`, applied in filename
 | `..._rls_policies.sql` | Row Level Security for every table above — see §8 |
 | `..._storage_buckets.sql` | The 4 storage buckets and their access policies |
 | `..._seed_data.sql` | Placeholder/demo content, unpublished by default — see its header comment |
+| `..._add_cancelled_enquiry_status.sql` | Adds the `CANCELLED` enquiry status — split into its own migration/transaction; Postgres won't let a new enum value be used in the same transaction that added it |
+| `..._booking_and_locations.sql` | `practice_locations`, Thursday-only/capped first-consultation booking rules + public availability check, `team_members` |
+| `..._confirmed_content.sql` | Replaces placeholder procedures with the practice's real, confirmed 15-procedure list, locations, qualifications, fees |
+| `..._homepage_copy_polish.sql` | Replaces the remaining `[Demo]`/`[Placeholder]`-tagged homepage copy with real, presentable (but still generic/structural) site copy — see its header comment for exactly what it does and doesn't claim |
 
 **Verified**, not just written: every migration was applied against a real
 local Postgres 16 instance (with a minimal stand-in for Supabase's
@@ -99,8 +120,12 @@ RLS was then tested as a genuine non-superuser role — anonymous, EDITOR and
 ADMIN identities were each simulated and checked against the policies below
 (13 cases: published-only visibility, enquiries being write-only for the
 public, EDITOR vs ADMIN-only actions, and the self-role-escalation guard).
-That verification setup is local-only scaffolding and isn't part of this
-repo or its history.
+Phase 4's own queries were re-verified the same way: every public page's
+query was run as an anonymous role against the fully-migrated schema,
+confirming published content is visible, unpublished/DRAFT content (the
+demo posts/testimonials/FAQs) is correctly invisible, and enquiries stay
+unreadable. That verification setup is local-only scaffolding and isn't
+part of this repo or its history.
 
 To add a new migration later: `npx supabase migration new <name>`, then
 `npm run db:push`.
@@ -182,7 +207,55 @@ connected yours — sign in, sign out, try `/admin` while logged out, try a
 password reset. Automated tests for this flow are Phase 10's job per the
 spec's own phase breakdown (§43/§46).
 
-## 11–14. Seed data, local dev, production build & deployment, security
+## 11. Public Website (Phase 4)
+
+Every public page (`src/pages/public/`) fetches directly from Supabase
+through `src/lib/supabase/queries.ts` — there's no hardcoded or mocked
+content anywhere in the frontend. A shared `useSupabaseQuery` hook
+(`src/hooks/`) handles loading/error state consistently, and `<DataState>`
+(`src/components/public/`) renders it: a real loading indicator, a real
+error message if the query fails, or an honest "nothing published yet"
+message if a table legitimately has no published rows — never placeholder
+content standing in for real content.
+
+- **Home** (`/`) — hero, intro, reconstructive-surgery highlight, patient
+  journey, featured procedures/testimonials, consultation CTA, all from
+  `homepage_content`/`about_content`.
+- **About** (`/about`) — qualifications, memberships/affiliations, team
+  (once published); biography and approach-to-care show a pending message
+  until the practice provides them (see §3's content list above).
+- **Procedures** (`/procedures`, `/procedures/:slug`) — grouped by
+  category; detail page includes images, linked FAQs and related
+  testimonials, all conditional on actually having any.
+- **Reconstructive Surgery** (`/reconstructive-surgery`) — a dedicated page
+  (not just a filtered procedures list), per the practice's emphasis on it.
+- **Patient Resources** (`/resources`, `/resources/:slug`) — published
+  blog posts only; `content_html` is sanitized with DOMPurify at render
+  time (`src/lib/sanitize.ts`), independent of whatever the future Phase 5/7
+  editor already does on the way in. Likes/comments/sharing are Phase 7 —
+  these are deliberately read-only articles, not a stubbed comment box.
+- **Gallery** (`/gallery`) — published images, filterable by category.
+- **Testimonials** (`/testimonials`) — published testimonials.
+- **FAQ** (`/faq`) — published FAQs, grouped by category where set.
+- **Contact** (`/contact`) — practice locations (with their own
+  phone/WhatsApp numbers), site-wide contact details, social links, map
+  embed — all conditional on what's actually filled in.
+- The site footer (`PublicLayout.tsx`) now pulls the same real contact
+  data instead of the Phase 1 "To be confirmed" placeholder.
+
+SEO: `usePageMeta()` (`src/hooks/`) sets `<title>` and the meta description
+per page from each row's own `seo_title`/`seo_description` columns (falling
+back to a sensible default), so those schema columns are actually used.
+
+**Verified**: `tsc --noEmit`, `npm run build` and `npm run lint` all pass
+clean (lint itself was dead until this phase — see `eslint.config.js`'s own
+comment: the dependencies were installed in Phase 1 but no config file had
+ever been committed). Every query above was also run directly against the
+fully-migrated schema as a genuine anonymous Postgres role (not the
+superuser) — see §7 — to confirm the empty/pending states shown above are
+what the real, current production data actually produces, not a guess.
+
+## 12–14. Local dev, production build & deployment, security
 
 Documented as each remaining phase lands.
 
@@ -192,13 +265,24 @@ Documented as each remaining phase lands.
 src/
   components/
     ui/        reusable primitives (Button, Container, Logo)
-    public/    public-site-specific components (Phase 4)
+    public/    public-site components (Phase 4) — DataState, PageHero,
+               SectionHeading, ProcedureCard, PostCard, TestimonialCard,
+               FaqAccordion, ConsultationCta
     admin/     admin-specific components (Phase 5)
+  hooks/
+    useSupabaseQuery.ts  loading/error/data state for any Supabase call
+    usePageMeta.ts        sets <title> + meta description per page
   layouts/
     PublicLayout.tsx
     AdminLayout.tsx
+  lib/
+    supabase/queries.ts  every public-facing Supabase query, in one place
+    format.ts            ZAR currency / date formatting
+    sanitize.ts          DOMPurify wrapper for rendered post HTML
   pages/
-    public/    (Phase 4)
+    public/    Home, About, Procedures, ProcedureDetail,
+               ReconstructiveSurgery, Resources, ArticleDetail, Gallery,
+               Testimonials, Faq, Contact (Phase 4)
     admin/     (Phase 5)
     auth/      Login, ForgotPassword, ResetPassword, shared AuthPageShell
   features/

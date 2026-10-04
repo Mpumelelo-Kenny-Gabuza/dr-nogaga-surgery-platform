@@ -1,0 +1,50 @@
+import type { Database } from "@/types/database.types";
+
+// Short aliases for the Row shapes the public pages read. Kept separate from
+// database.types.ts (which is generated and must never be hand-edited) so
+// these can be imported tersely everywhere else.
+export type Procedure = Database["public"]["Tables"]["procedures"]["Row"];
+export type ProcedureCategory = Database["public"]["Tables"]["procedure_categories"]["Row"];
+export type ProcedureImage = Database["public"]["Tables"]["procedure_images"]["Row"];
+export type Post = Database["public"]["Tables"]["posts"]["Row"];
+export type PostCategory = Database["public"]["Tables"]["post_categories"]["Row"];
+export type Testimonial = Database["public"]["Tables"]["testimonials"]["Row"];
+export type Faq = Database["public"]["Tables"]["faqs"]["Row"];
+export type GalleryItem = Database["public"]["Tables"]["gallery_items"]["Row"];
+export type PracticeLocation = Database["public"]["Tables"]["practice_locations"]["Row"];
+export type SocialLink = Database["public"]["Tables"]["social_links"]["Row"];
+export type TeamMember = Database["public"]["Tables"]["team_members"]["Row"];
+export type AboutQualification = Database["public"]["Tables"]["about_qualifications"]["Row"];
+export type AboutAffiliation = Database["public"]["Tables"]["about_affiliations"]["Row"];
+export type HomepageContent = Database["public"]["Tables"]["homepage_content"]["Row"];
+export type AboutContent = Database["public"]["Tables"]["about_content"]["Row"];
+export type SiteSettings = Database["public"]["Tables"]["site_settings"]["Row"];
+
+export type ProcedureWithCategory = Procedure & {
+  procedure_categories: Pick<ProcedureCategory, "id" | "name" | "slug"> | null;
+};
+
+export type PostWithRelations = Post & {
+  post_categories: Pick<PostCategory, "id" | "name" | "slug"> | null;
+  profiles: { id: string; full_name: string | null } | null;
+};
+
+/** One step of homepage_content.patient_journey (jsonb array). */
+export type PatientJourneyStep = { title: string; text: string };
+
+/**
+ * homepage_content.patient_journey is stored as jsonb (typed `Json` by the
+ * generator, which only promises "valid JSON", not this shape). This
+ * validates it at the boundary rather than trusting a cast — a malformed
+ * row degrades to an empty list instead of crashing the homepage.
+ */
+export function parsePatientJourney(value: unknown): PatientJourneyStep[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (step): step is PatientJourneyStep =>
+      typeof step === "object" &&
+      step !== null &&
+      typeof (step as Record<string, unknown>).title === "string" &&
+      typeof (step as Record<string, unknown>).text === "string"
+  );
+}

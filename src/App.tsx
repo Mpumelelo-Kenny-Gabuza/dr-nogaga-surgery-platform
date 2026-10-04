@@ -7,23 +7,36 @@ import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import { Login } from "@/pages/auth/Login";
 import { ForgotPassword } from "@/pages/auth/ForgotPassword";
 import { ResetPassword } from "@/pages/auth/ResetPassword";
+import { Home } from "@/pages/public/Home";
+import { About } from "@/pages/public/About";
+import { Procedures } from "@/pages/public/Procedures";
+import { ProcedureDetail } from "@/pages/public/ProcedureDetail";
+import { ReconstructiveSurgery } from "@/pages/public/ReconstructiveSurgery";
+import { Resources } from "@/pages/public/Resources";
+import { ArticleDetail } from "@/pages/public/ArticleDetail";
+import { Gallery } from "@/pages/public/Gallery";
+import { Testimonials } from "@/pages/public/Testimonials";
+import { Faq } from "@/pages/public/Faq";
+import { Contact } from "@/pages/public/Contact";
 
 export default function App() {
   return (
     <Routes>
       {/* Public site — §4/§5 (Phase 4) */}
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<Placeholder title="Home" phase="Phase 4 — Public Website" />} />
-        <Route path="/about" element={<Placeholder title="About Dr Nogaga" phase="Phase 4" />} />
-        <Route path="/procedures" element={<Placeholder title="Procedures" phase="Phase 4" />} />
-        <Route path="/procedures/:slug" element={<Placeholder title="Procedure detail" phase="Phase 4" />} />
-        <Route path="/reconstructive-surgery" element={<Placeholder title="Reconstructive Surgery" phase="Phase 4" />} />
-        <Route path="/resources" element={<Placeholder title="Patient Resources / Blog" phase="Phase 4 + 7 — blog engagement" />} />
-        <Route path="/resources/:slug" element={<Placeholder title="Article" phase="Phase 4 + 7 — likes, comments, sharing" />} />
-        <Route path="/gallery" element={<Placeholder title="Gallery" phase="Phase 4" />} />
-        <Route path="/testimonials" element={<Placeholder title="Testimonials" phase="Phase 4" />} />
-        <Route path="/faq" element={<Placeholder title="Frequently Asked Questions" phase="Phase 4" />} />
-        <Route path="/contact" element={<Placeholder title="Contact" phase="Phase 4" />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/procedures" element={<Procedures />} />
+        <Route path="/procedures/:slug" element={<ProcedureDetail />} />
+        <Route path="/reconstructive-surgery" element={<ReconstructiveSurgery />} />
+        {/* Engagement (likes, comments, sharing) lands in Phase 7 — these
+            two render real published content read-only until then. */}
+        <Route path="/resources" element={<Resources />} />
+        <Route path="/resources/:slug" element={<ArticleDetail />} />
+        <Route path="/gallery" element={<Gallery />} />
+        <Route path="/testimonials" element={<Testimonials />} />
+        <Route path="/faq" element={<Faq />} />
+        <Route path="/contact" element={<Contact />} />
         <Route path="/consultation" element={<Placeholder title="Consultation Enquiry" phase="Phase 6 — enquiry workflow" />} />
         <Route path="/privacy" element={<Placeholder title="Privacy Policy" phase="Phase 9" />} />
         <Route path="/terms" element={<Placeholder title="Terms" phase="Phase 9" />} />

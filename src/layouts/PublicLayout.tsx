@@ -5,6 +5,9 @@ import clsx from "clsx";
 import { Logo } from "@/components/ui/Logo";
 import { buttonClasses } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
+import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
+import { getPracticeLocations, getSiteSettings } from "@/lib/supabase/queries";
+import type { PracticeLocation, SiteSettings } from "@/types/content";
 
 const NAV_LINKS = [
   { to: "/about", label: "About" },
@@ -93,7 +96,24 @@ export function PublicLayout() {
   );
 }
 
+type FooterData = { settings: SiteSettings | null; locations: PracticeLocation[] };
+
+async function loadFooterData() {
+  const [settings, locations] = await Promise.all([getSiteSettings(), getPracticeLocations()]);
+  return {
+    data: { settings: settings.data, locations: locations.data ?? [] } satisfies FooterData,
+    error: locations.error ?? null,
+  };
+}
+
 function Footer() {
+  // Real contact details, same source as the Contact page (site_settings +
+  // practice_locations) — replaces the Phase 1 "To be confirmed" stand-in
+  // now that the practice has confirmed its locations and email.
+  const { data } = useSupabaseQuery<FooterData>(loadFooterData, []);
+  const settings = data?.settings;
+  const primaryLocation = data?.locations[0];
+
   return (
     <footer className="bg-ink text-mist">
       <Container className="grid gap-10 py-16 md:grid-cols-4">
@@ -118,16 +138,33 @@ function Footer() {
         <div>
           <h3 className="text-sm font-semibold text-white">Contact</h3>
           <ul className="mt-4 space-y-2 text-sm text-mist/80">
-            <li>Phone: To be confirmed</li>
-            <li>Email: To be confirmed</li>
-            <li>Practice address: To be confirmed</li>
+            {(settings?.contact_phone || primaryLocation?.landline) && (
+              <li>Phone: {settings?.contact_phone ?? primaryLocation?.landline}</li>
+            )}
+            {(settings?.contact_whatsapp || primaryLocation?.whatsapp) && (
+              <li>WhatsApp: {settings?.contact_whatsapp ?? primaryLocation?.whatsapp}</li>
+            )}
+            {settings?.contact_email && <li>Email: {settings.contact_email}</li>}
+            {(settings?.address || primaryLocation?.address) && (
+              <li>{settings?.address ?? primaryLocation?.address}</li>
+            )}
+            {!settings?.contact_phone &&
+              !primaryLocation &&
+              !settings?.contact_email && (
+                <li>
+                  See <Link to="/contact" className="hover:text-white">Contact</Link> for details
+                </li>
+              )}
           </ul>
         </div>
       </Container>
 
       <div className="border-t border-white/10">
         <Container className="flex flex-col gap-3 py-6 text-xs text-mist/70 md:flex-row md:items-center md:justify-between">
-          <span>&copy; {new Date().getFullYear()} Dr Viwe Nogaga. All rights reserved.</span>
+          <span>
+            {settings?.footer_copyright_text ??
+              `© ${new Date().getFullYear()} Dr Viwe Nogaga. All rights reserved.`}
+          </span>
           <div className="flex gap-4">
             <Link to="/privacy" className="hover:text-white">Privacy</Link>
             <Link to="/terms" className="hover:text-white">Terms</Link>
