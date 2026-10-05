@@ -19,6 +19,25 @@ import { Testimonials } from "@/pages/public/Testimonials";
 import { Faq } from "@/pages/public/Faq";
 import { Contact } from "@/pages/public/Contact";
 
+// Admin — Phase 5 (CMS). The admin "About" page is aliased on import since
+// its export name collides with the public About page above; both are
+// genuinely named `About` in their own files because each is the obvious
+// name for what it is.
+import { Dashboard } from "@/pages/admin/Dashboard";
+import { WebsiteContent } from "@/pages/admin/WebsiteContent";
+import { About as AdminAbout } from "@/pages/admin/About";
+import { ProceduresList } from "@/pages/admin/procedures/ProceduresList";
+import { ProcedureForm } from "@/pages/admin/procedures/ProcedureForm";
+import { ResourcesList } from "@/pages/admin/resources/ResourcesList";
+import { PostForm } from "@/pages/admin/resources/PostForm";
+import { GalleryList } from "@/pages/admin/GalleryList";
+import { GalleryForm } from "@/pages/admin/GalleryForm";
+import { TestimonialsList } from "@/pages/admin/TestimonialsList";
+import { TestimonialForm } from "@/pages/admin/TestimonialForm";
+import { FaqsList } from "@/pages/admin/FaqsList";
+import { FaqForm } from "@/pages/admin/FaqForm";
+import { Settings } from "@/pages/admin/Settings";
+
 export default function App() {
   return (
     <Routes>
@@ -51,21 +70,42 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/admin" element={<Placeholder title="Dashboard" phase="Phase 5 — CMS" />} />
-        <Route path="/admin/content" element={<Placeholder title="Website Content" phase="Phase 5" />} />
-        <Route path="/admin/about" element={<Placeholder title="About" phase="Phase 5" />} />
-        <Route path="/admin/procedures" element={<Placeholder title="Procedures" phase="Phase 5" />} />
-        <Route path="/admin/resources" element={<Placeholder title="Resources" phase="Phase 5" />} />
+        <Route path="/admin" element={<Dashboard />} />
+        <Route path="/admin/content" element={<WebsiteContent />} />
+        <Route path="/admin/about" element={<AdminAbout />} />
+
+        <Route path="/admin/procedures" element={<ProceduresList />} />
+        <Route path="/admin/procedures/new" element={<ProcedureForm />} />
+        <Route path="/admin/procedures/:id" element={<ProcedureForm />} />
+
+        <Route path="/admin/resources" element={<ResourcesList />} />
+        <Route path="/admin/resources/new" element={<PostForm />} />
+        <Route path="/admin/resources/:id" element={<PostForm />} />
+
         <Route path="/admin/comments" element={<Placeholder title="Comments" phase="Phase 7 — moderation" />} />
-        <Route path="/admin/gallery" element={<Placeholder title="Gallery" phase="Phase 5" />} />
-        <Route path="/admin/testimonials" element={<Placeholder title="Testimonials" phase="Phase 5" />} />
-        <Route path="/admin/faqs" element={<Placeholder title="FAQs" phase="Phase 5" />} />
+
+        <Route path="/admin/gallery" element={<GalleryList />} />
+        <Route path="/admin/gallery/new" element={<GalleryForm />} />
+        <Route path="/admin/gallery/:id" element={<GalleryForm />} />
+
+        <Route path="/admin/testimonials" element={<TestimonialsList />} />
+        <Route path="/admin/testimonials/new" element={<TestimonialForm />} />
+        <Route path="/admin/testimonials/:id" element={<TestimonialForm />} />
+
+        <Route path="/admin/faqs" element={<FaqsList />} />
+        <Route path="/admin/faqs/new" element={<FaqForm />} />
+        <Route path="/admin/faqs/:id" element={<FaqForm />} />
+
         <Route path="/admin/enquiries" element={<Placeholder title="Enquiries" phase="Phase 6" />} />
+
         {/* No route-level ADMIN-only gate here beyond the sidebar hiding it —
             RLS is the real boundary (spec §22: never rely on frontend-only
-            protection), so an EDITOR who browses here directly still can't
-            read or write anything the Settings page would show. */}
-        <Route path="/admin/settings" element={<Placeholder title="Settings" phase="Phase 5" />} />
+            protection). An EDITOR who browses here directly can still edit
+            site_settings/practice_locations (RLS grants those to any staff
+            member), but the role/active controls on existing profiles are
+            genuinely ADMIN-only at the database level regardless of this
+            route being reachable. */}
+        <Route path="/admin/settings" element={<Settings />} />
       </Route>
 
       {/* Auth — §22/23. Deliberately outside ProtectedRoute: you're not

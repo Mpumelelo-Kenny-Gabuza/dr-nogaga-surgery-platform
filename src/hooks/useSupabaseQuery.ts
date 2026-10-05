@@ -6,6 +6,8 @@ type QueryState<T> = {
   loading: boolean;
   /** A real Postgres/PostgREST error (e.g. RLS denial, bad query) — never swallowed silently. */
   error: PostgrestError | Error | null;
+  /** Re-runs the query — admin list pages call this after a delete/create elsewhere instead of a full reload. */
+  refetch: () => void;
 };
 
 /**
@@ -22,7 +24,12 @@ export function useSupabaseQuery<T>(
   queryFn: () => Promise<{ data: T | null; error: PostgrestError | Error | null }>,
   deps: DependencyList
 ): QueryState<T> {
-  const [state, setState] = useState<QueryState<T>>({ data: null, loading: true, error: null });
+  const [state, setState] = useState<Omit<QueryState<T>, "refetch">>({
+    data: null,
+    loading: true,
+    error: null,
+  });
+  const [refetchCount, setRefetchCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +49,7 @@ export function useSupabaseQuery<T>(
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, refetchCount]);
 
-  return state;
+  return { ...state, refetch: () => setRefetchCount((c) => c + 1) };
 }
