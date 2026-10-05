@@ -32,7 +32,7 @@ versus what's still a placeholder route.
 | 2 | Supabase schema, migrations, RLS, storage buckets | **Done** (this commit) |
 | 3 | Authentication & roles (ADMIN / EDITOR) | **Done** (this commit) |
 | 4 | Public website pages (real content, wired to Supabase) | **Done** (this commit) |
-| 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | Not started |
+| 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | **Done** (this commit) |
 | 6 | Consultation enquiry form + enquiry dashboard | Not started |
 | 7 | Blog likes, comments, moderation, practice replies, sharing | Not started |
 | 8 | Security pass (RLS audit, validation, sanitization) | Not started |
@@ -255,7 +255,95 @@ fully-migrated schema as a genuine anonymous Postgres role (not the
 superuser) — see §7 — to confirm the empty/pending states shown above are
 what the real, current production data actually produces, not a guess.
 
-## 12–14. Local dev, production build & deployment, security
+## 12. CMS Admin (Phase 5)
+
+Every admin screen writes directly to Supabase through
+`src/lib/supabase/mutations.ts` — there is no mock data, no local-only
+state standing in for a save, and no "Coming soon" admin page left in
+`App.tsx`. Reads go through a parallel `src/lib/supabase/adminQueries.ts`
+(returns every row regardless of status, unlike the public `queries.ts`)
+— safe only because RLS grants staff full `SELECT`, never because this
+file filters anything itself.
+
+- **Dashboard** (`/admin`) — published-vs-total counts for procedures,
+  resources, gallery, testimonials and FAQs, each linking to its section,
+  plus a Recent Activity feed from `audit_logs`. That feed only queries
+  (and only renders) for an ADMIN — `audit_logs` is ADMIN-only per RLS, so
+  an EDITOR's own session would otherwise get back zero rows and show a
+  misleading "No admin activity recorded yet." instead of the honest
+  "Visible to admins only."
+- **Website Content** (`/admin/content`) — the `homepage_content` singleton
+  (hero, intro, reconstructive-surgery highlight, patient journey steps,
+  consultation CTA) and `social_links`.
+- **About** (`/admin/about`) — the `about_content` singleton (biography,
+  approach to care — with a hint that blank is the honest state until the
+  practice provides final wording) plus qualifications, affiliations and
+  team members, each a reorderable repeatable list.
+- **Procedures** (`/admin/procedures`) — full CRUD: category, descriptions,
+  patient/preparation/recovery information, a reorderable gallery of
+  images (uploaded straight to Storage), related FAQs, publishing status,
+  and SEO fields.
+- **Resources** (`/admin/resources`) — blog post CRUD with a real WYSIWYG
+  editor (TipTap, not a hand-rolled `contentEditable`), tags, reading time,
+  and `published_at` set automatically the moment a post is first marked
+  Published rather than editable by hand.
+- **Gallery / Testimonials / FAQs** (`/admin/gallery`,
+  `/admin/testimonials`, `/admin/faqs`) — straightforward CRUD, each with
+  image upload where relevant and a real confirm dialog before delete.
+- **Settings** (`/admin/settings`) — the `site_settings` singleton
+  (contact details, fees, footer/SEO defaults), `practice_locations`
+  CRUD (East London and Mthatha each keep their own landline/WhatsApp), and
+  staff access: change an existing account's role or active status. The
+  signed-in admin's own row has both controls disabled in the UI — on top
+  of the `prevent_role_self_escalation` trigger (§8), this also stops
+  someone locking themselves out by deactivating their own account.
+  **Creating a brand-new staff login is deliberately not here** — it needs
+  Supabase's admin API (a service-role key), which must never run in the
+  browser, so it stays the manual dashboard step in §10.
+
+Shared admin infrastructure, reused across every screen above:
+`AdminDataTable`, `AdminFormShell`/`FormSection`, `RepeatableList` (generic
+add/reorder/remove for arrays), `ConfirmDialog` (a real modal, not
+`window.confirm`), `ImageUploadField` (uploads to Storage and registers the
+file in `media_assets`, independent of whatever content record references
+it — the start of a Media Library), `RichTextEditor` (TipTap, sanitized
+with the same DOMPurify wrapper Phase 4 uses to render it), and a toast
+notification system for save feedback. Every create/update/delete call in
+`mutations.ts` writes an `audit_logs` row after it succeeds (best-effort —
+a logging failure never blocks the mutation it's describing), satisfying
+the "who did what, to which record, when" requirement without each page
+having to remember to call it itself.
+
+**Verified**: `tsc --noEmit`, `npm run build` and `npm run lint` all pass
+clean. Beyond that, every write path above was re-applied against a fresh
+local Postgres 16 instance (the same disposable `auth`/`storage` stand-in
+used to verify Phases 2–4) and run as genuine non-superuser roles — not
+the `postgres` superuser, which bypasses RLS entirely:
+
+- An **EDITOR** identity can create/update/delete across every table this
+  phase's admin screens touch (procedures, posts, gallery items,
+  testimonials, FAQs, the three content singletons, qualifications,
+  affiliations, team members, social links, practice locations) and can
+  insert an `audit_logs` row (what `logAction()` does after every
+  mutation) — but genuinely cannot read the audit log back (0 rows, not
+  an error), cannot delete an enquiry, and — the specific defense-in-depth
+  case the `prevent_role_self_escalation` trigger exists for — cannot
+  promote themselves to ADMIN even though the "update own profile" policy
+  would otherwise let the UPDATE reach the table at all.
+- An **ADMIN** identity can do everything above, can read the audit log
+  (confirmed it sees the row the EDITOR identity inserted), can delete an
+  enquiry, and can change another profile's role/active status.
+- An **anonymous** identity still cannot read enquiries.
+
+That test run caught one real bug before it reached this commit: the
+Dashboard's Recent Activity feed was querying `audit_logs` for every
+signed-in staff member, which — now confirmed directly rather than
+assumed — RLS silently empties for an EDITOR, rendering a false "No
+activity" instead of "you can't see this." Fixed as described above. This
+verification setup is local-only scaffolding and isn't part of this repo
+or its history, same as Phases 2–4.
+
+## 13–15. Local dev, production build & deployment, security
 
 Documented as each remaining phase lands.
 
@@ -264,40 +352,49 @@ Documented as each remaining phase lands.
 ```
 src/
   components/
-    ui/        reusable primitives (Button, Container, Logo)
+    ui/        reusable primitives — Button, Container, Logo, Field,
+               Textarea, Select, Toggle
     public/    public-site components (Phase 4) — DataState, PageHero,
                SectionHeading, ProcedureCard, PostCard, TestimonialCard,
                FaqAccordion, ConsultationCta
-    admin/     admin-specific components (Phase 5)
+    admin/     admin-specific components (Phase 5) — AdminDataTable,
+               AdminFormShell/FormSection, RepeatableList, ConfirmDialog,
+               ImageUploadField, RichTextEditor, StatusBadge,
+               StaffSection, PracticeLocationsSection
   hooks/
-    useSupabaseQuery.ts  loading/error/data state for any Supabase call
-    usePageMeta.ts        sets <title> + meta description per page
+    useSupabaseQuery.ts     loading/error/data state for any Supabase
+                            call, with a native refetch()
+    useSupabaseMutation.ts  loading/error state for a single write
+    usePageMeta.ts          sets <title> + meta description per page
   layouts/
     PublicLayout.tsx
     AdminLayout.tsx
   lib/
-    supabase/queries.ts  every public-facing Supabase query, in one place
-    format.ts            ZAR currency / date formatting
-    sanitize.ts          DOMPurify wrapper for rendered post HTML
-  pages/
-    public/    Home, About, Procedures, ProcedureDetail,
-               ReconstructiveSurgery, Resources, ArticleDetail, Gallery,
-               Testimonials, Faq, Contact (Phase 4)
-    admin/     (Phase 5)
-    auth/      Login, ForgotPassword, ResetPassword, shared AuthPageShell
-  features/
-    auth/      AuthProvider, useAuth, ProtectedRoute
-    ...        one more folder per domain feature, added as each is built
-  lib/
     supabase/
-      client.ts          typed Supabase client (reads VITE_SUPABASE_* env vars)
-    validation/
-    utils/
-  hooks/
+      client.ts       typed Supabase client (reads VITE_SUPABASE_* env vars)
+      queries.ts       every public-facing query (Phase 4) — published only
+      adminQueries.ts  every staff-side read (Phase 5) — all rows, RLS-gated
+      mutations.ts     every staff-side write (Phase 5), each logged via audit.ts
+      audit.ts         best-effort audit_logs insert after a mutation
+      upload.ts         Storage upload + media_assets registry insert
+    format.ts    ZAR currency / date formatting
+    sanitize.ts  DOMPurify wrapper for rendered post HTML
+    slug.ts      slugify() for auto-generated slugs
+  pages/
+    public/  Home, About, Procedures, ProcedureDetail,
+             ReconstructiveSurgery, Resources, ArticleDetail, Gallery,
+             Testimonials, Faq, Contact (Phase 4)
+    admin/   Dashboard, WebsiteContent, About, Settings, and a
+             List+Form pair per entity — procedures/, resources/,
+             Gallery*, Testimonials*, Faqs* (Phase 5)
+    auth/    Login, ForgotPassword, ResetPassword, shared AuthPageShell
+  features/
+    auth/   AuthProvider, useAuth, ProtectedRoute
+    toast/  ToastProvider, useToast — save feedback across every admin form
   types/
-    database.types.ts    generated from the schema — regenerate with `npm run db:types`
-  services/
+    database.types.ts  generated from the schema — regenerate with `npm run db:types`
+    content.ts          hand-written Row-shape aliases + join types
 supabase/
   config.toml
-  migrations/             11 migrations — see README §7
+  migrations/  15 migrations — see README §7
 ```

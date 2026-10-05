@@ -19,6 +19,8 @@ export type AboutAffiliation = Database["public"]["Tables"]["about_affiliations"
 export type HomepageContent = Database["public"]["Tables"]["homepage_content"]["Row"];
 export type AboutContent = Database["public"]["Tables"]["about_content"]["Row"];
 export type SiteSettings = Database["public"]["Tables"]["site_settings"]["Row"];
+export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+export type AuditLog = Database["public"]["Tables"]["audit_logs"]["Row"];
 
 export type ProcedureWithCategory = Procedure & {
   procedure_categories: Pick<ProcedureCategory, "id" | "name" | "slug"> | null;
@@ -27,6 +29,14 @@ export type ProcedureWithCategory = Procedure & {
 export type PostWithRelations = Post & {
   post_categories: Pick<PostCategory, "id" | "name" | "slug"> | null;
   profiles: { id: string; full_name: string | null } | null;
+};
+
+export type TestimonialWithProcedure = Testimonial & {
+  procedures: { id: string; title: string } | null;
+};
+
+export type AuditLogWithActor = AuditLog & {
+  profiles: { full_name: string | null } | null;
 };
 
 /** One step of homepage_content.patient_journey (jsonb array). */
