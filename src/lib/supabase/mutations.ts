@@ -389,3 +389,42 @@ export async function setProfileActive(id: string, isActive: boolean) {
   if (data) await logAction("UPDATE", "profiles", id, { is_active: isActive });
   return { data, error };
 }
+
+// ----------------------------------------------------------------------------
+// Enquiries (Phase 6) — status changes and notes are any-staff per RLS
+// ("staff update enquiry status" / "only staff may access enquiry notes");
+// deleting the enquiry itself is ADMIN-only ("admins may delete an
+// enquiry"). The UI hides the delete control for an EDITOR as a nicety
+// (see EnquiryDetail.tsx) — this function doesn't duplicate that check,
+// RLS is what actually enforces it.
+// ----------------------------------------------------------------------------
+export async function updateEnquiryStatus(
+  id: string,
+  status: Database["public"]["Enums"]["enquiry_status"]
+) {
+  const { data, error } = await supabase
+    .from("enquiries")
+    .update({ status })
+    .eq("id", id)
+    .select("*, practice_locations(id, display_name)")
+    .single();
+  if (data) await logAction("UPDATE", "enquiries", id, { status });
+  return { data, error };
+}
+
+export async function deleteEnquiry(id: string) {
+  const { error } = await supabase.from("enquiries").delete().eq("id", id);
+  if (!error) await logAction("DELETE", "enquiries", id);
+  return { error };
+}
+
+export async function addEnquiryNote(enquiryId: string, note: string) {
+  const { data: userData } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("enquiry_notes")
+    .insert({ enquiry_id: enquiryId, note, author_id: userData.user?.id ?? null })
+    .select("*, profiles(full_name)")
+    .single();
+  if (data) await logAction("CREATE", "enquiry_notes", data.id, { enquiry_id: enquiryId });
+  return { data, error };
+}

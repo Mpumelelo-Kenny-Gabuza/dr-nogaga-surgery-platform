@@ -57,7 +57,7 @@ export function PublicLayout() {
 
           <div className="hidden items-center gap-3 lg:flex">
             <Link to="/consultation" className={buttonClasses("primary")}>
-              Book Your Consultation
+              Book a Consultation
             </Link>
           </div>
 

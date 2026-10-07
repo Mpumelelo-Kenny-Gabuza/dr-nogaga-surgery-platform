@@ -106,3 +106,31 @@ export function getRecentAuditLogs(limit = 20) {
     .order("created_at", { ascending: false })
     .limit(limit);
 }
+
+// ----------------------------------------------------------------------------
+// Enquiries (Phase 6) — "only staff may read enquiries" (migration
+// 20260930090800) is the real boundary; these three calls return every
+// enquiry/note regardless of status for a signed-in staff session.
+// ----------------------------------------------------------------------------
+export function getAllEnquiries() {
+  return supabase
+    .from("enquiries")
+    .select("*, practice_locations(id, display_name)")
+    .order("created_at", { ascending: false });
+}
+
+export function getEnquiryById(id: string) {
+  return supabase
+    .from("enquiries")
+    .select("*, practice_locations(id, display_name)")
+    .eq("id", id)
+    .single();
+}
+
+export function getEnquiryNotes(enquiryId: string) {
+  return supabase
+    .from("enquiry_notes")
+    .select("*, profiles(full_name)")
+    .eq("enquiry_id", enquiryId)
+    .order("created_at", { ascending: false });
+}

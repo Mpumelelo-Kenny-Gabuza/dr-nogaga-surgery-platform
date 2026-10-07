@@ -21,6 +21,8 @@ export type AboutContent = Database["public"]["Tables"]["about_content"]["Row"];
 export type SiteSettings = Database["public"]["Tables"]["site_settings"]["Row"];
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type AuditLog = Database["public"]["Tables"]["audit_logs"]["Row"];
+export type Enquiry = Database["public"]["Tables"]["enquiries"]["Row"];
+export type EnquiryNote = Database["public"]["Tables"]["enquiry_notes"]["Row"];
 
 export type ProcedureWithCategory = Procedure & {
   procedure_categories: Pick<ProcedureCategory, "id" | "name" | "slug"> | null;
@@ -36,6 +38,14 @@ export type TestimonialWithProcedure = Testimonial & {
 };
 
 export type AuditLogWithActor = AuditLog & {
+  profiles: { full_name: string | null } | null;
+};
+
+export type EnquiryWithLocation = Enquiry & {
+  practice_locations: Pick<PracticeLocation, "id" | "display_name"> | null;
+};
+
+export type EnquiryNoteWithAuthor = EnquiryNote & {
   profiles: { full_name: string | null } | null;
 };
 

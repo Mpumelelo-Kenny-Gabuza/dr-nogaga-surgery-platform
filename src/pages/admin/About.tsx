@@ -128,7 +128,7 @@ function AboutForm({
         <Textarea
           label="Biography"
           rows={6}
-          // hint="Leave blank until the practice provides final wording — the public About page shows a 'being finalised' message rather than placeholder text."
+          hint="Leave blank until the practice provides final wording — the public About page shows a 'being finalised' message rather than placeholder text."
           {...field("biography")}
         />
         <Textarea label="Approach to patient care" rows={4} {...field("approach_to_patient_care")} />

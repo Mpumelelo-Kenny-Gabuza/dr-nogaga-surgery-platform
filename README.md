@@ -32,8 +32,8 @@ versus what's still a placeholder route.
 | 2 | Supabase schema, migrations, RLS, storage buckets | **Done** (this commit) |
 | 3 | Authentication & roles (ADMIN / EDITOR) | **Done** (this commit) |
 | 4 | Public website pages (real content, wired to Supabase) | **Done** (this commit) |
-| 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | **Done** (this commit) |
-| 6 | Consultation enquiry form + enquiry dashboard | Not started |
+| 5 | CMS admin screens (procedures, resources, FAQs, gallery, testimonials, settings) | **Done** |
+| 6 | Consultation enquiry form + enquiry dashboard | **Done** (this commit) |
 | 7 | Blog likes, comments, moderation, practice replies, sharing | Not started |
 | 8 | Security pass (RLS audit, validation, sanitization) | Not started |
 | 9 | SEO, sitemap, accessibility pass | Not started |
@@ -41,9 +41,9 @@ versus what's still a placeholder route.
 
 Every route in the spec is wired up — see `src/App.tsx`. Public pages
 (`/`, `/about`, `/procedures`, `/reconstructive-surgery`, `/resources`,
-`/gallery`, `/testimonials`, `/faq`, `/contact`) now render real data from
-Supabase. `/consultation`, `/privacy`, `/terms` and `/disclaimer` still
-render a labelled placeholder — those are Phase 6 and Phase 9 respectively.
+`/gallery`, `/testimonials`, `/faq`, `/contact`, `/consultation`) now render
+real data from Supabase. `/privacy`, `/terms` and `/disclaimer` still render
+a labelled placeholder — those are Phase 9.
 
 **What's genuinely live right now vs. still pending from the practice** —
 Phase 4 wires every page to the database honestly, which means a few
@@ -92,7 +92,7 @@ Server-side-only operations go in Supabase Edge Functions (Phase 2).
 
 ## 7. Database Migrations
 
-All 15 migrations live in `supabase/migrations/`, applied in filename
+All 16 migrations live in `supabase/migrations/`, applied in filename
 (timestamp) order:
 
 | File | Covers |
@@ -112,6 +112,7 @@ All 15 migrations live in `supabase/migrations/`, applied in filename
 | `..._booking_and_locations.sql` | `practice_locations`, Thursday-only/capped first-consultation booking rules + public availability check, `team_members` |
 | `..._confirmed_content.sql` | Replaces placeholder procedures with the practice's real, confirmed 15-procedure list, locations, qualifications, fees |
 | `..._homepage_copy_polish.sql` | Replaces the remaining `[Demo]`/`[Placeholder]`-tagged homepage copy with real, presentable (but still generic/structural) site copy — see its header comment for exactly what it does and doesn't claim |
+| `..._submit_enquiry_function.sql` | `submit_enquiry()` RPC (the public form's only write path — see §13), and a `security definer` fix to `check_thursday_capacity()` that closes a real pre-existing capacity-enforcement gap — see §13 for what the gap was and how it was found |
 
 **Verified**, not just written: every migration was applied against a real
 local Postgres 16 instance (with a minimal stand-in for Supabase's
@@ -343,7 +344,111 @@ activity" instead of "you can't see this." Fixed as described above. This
 verification setup is local-only scaffolding and isn't part of this repo
 or its history, same as Phases 2–4.
 
-## 13–15. Local dev, production build & deployment, security
+## 13. Consultation Enquiries (Phase 6)
+
+**Public** (`/consultation`, `src/pages/public/Consultation.tsx`) — a single
+form covering all three enquiry paths the practice needs:
+
+- **New Consultation** — first-time patients, Thursdays only. The date
+  picker is fed by `get_thursday_availability()` (a `security definer` RPC,
+  already in place since the Phase 5 booking migration), so the "3 of 5
+  left" / "Fully booked" labels are real remaining-capacity numbers, never
+  a client-side guess.
+- **Review / Follow-up** — existing patients, Mondays only. These have no
+  capacity cap, so the next 8 Mondays are computed locally
+  (`src/lib/dates.ts`) rather than round-tripping for data that doesn't
+  exist.
+- **General Question** — no date required. This deliberately reuses the
+  schema's `NEW_CONSULTATION` appointment type with `preferred_date` left
+  `null`, rather than adding a third `appointment_type` enum value for a
+  presentation-only concept — the existing day-of-week trigger already
+  treats a null `preferred_date` as a no-op.
+
+The area-of-enquiry dropdown is sourced from real published procedures
+(plus a free-text "Something else"), the location field from real published
+`practice_locations`, and the POPIA consent checkbox is required before
+submission is even attempted. On success the patient sees the real
+server-generated reference number (`ENQ-2026-00001`-style) — never a
+client-invented one.
+
+**Why a dedicated `submit_enquiry()` RPC** (`supabase/migrations/..._submit_enquiry_function.sql`,
+wrapped by `src/lib/supabase/enquiry.ts`) **instead of a raw insert**: the
+public "anyone may submit a consultation enquiry" INSERT policy from Phase 2
+still works unchanged (confirmed in this phase's RLS battery, see below),
+but a plain `.insert(values).select()` doesn't — the same RETURNING-visibility
+mechanism documented for `audit_logs` in §12: supabase-js's `.select()` adds
+`Prefer: return=representation` (a `RETURNING` at the SQL level), and an
+anonymous visitor has no `SELECT` policy on `enquiries` to satisfy it, so
+the whole insert fails even though its own `WITH CHECK` passed. `submit_enquiry()`
+is `security definer`, does the insert itself, and returns only `{id, reference}`
+— never the full row — so the patient gets a real confirmation without
+needing a public `SELECT` policy on a table that must stay staff-only.
+
+**A real bug found and fixed in the course of building this**: the
+Thursday booking cap (5 per day, enforced by `check_thursday_capacity()`,
+written in Phase 5) was never actually effective for genuine public
+submissions. The trigger counts existing non-cancelled `NEW_CONSULTATION`
+rows for the target date — but that `COUNT` runs as whatever role fired the
+triggering statement, and an anonymous visitor has no `SELECT` policy on
+`enquiries`, so the trigger's own count of *other* people's bookings was
+silently near-zero every time, regardless of how full the day actually was.
+This wasn't caught earlier because every prior test of it ran as a staff or
+superuser role, which can see the real count. Found by reproducing it
+directly against a local Postgres instance — a 6th booking for an
+already-full Thursday succeeded when it should have been rejected,
+confirmed against the real row count as superuser — not by inspection
+alone. Fixed by adding `security definer set search_path = public` to the
+trigger function itself (same fix shape as `get_thursday_availability()`
+already had). Re-verified after the fix: 5 sequential bookings for the same
+Thursday succeed with real reference numbers, and a 6th is correctly
+rejected with the trigger's own "fully booked" exception.
+
+**Admin** (`/admin/enquiries`, `/admin/enquiries/:id`,
+`src/pages/admin/enquiries/`) — a list (filterable by status) and a detail
+page for enquiries patients actually submitted. There is deliberately no
+"staff creates a new enquiry" feature anywhere in the admin — this only
+ever manages what came in through the public form. From the detail page,
+any staff member can change status and add internal notes (never shown to
+the patient); deleting an enquiry is ADMIN-only, enforced by RLS and hidden
+for EDITOR in the UI as a nicety, same pattern as the staff-management
+screen in §12. The Dashboard also gets a real "new enquiries" stat card now
+— Phase 5 deliberately left that card out, with a code comment explaining
+why (no system to report on yet); now that the system is real, the card is
+too.
+
+**Verified**: `tsc --noEmit`, `npm run build` and `npm run lint` all pass
+clean. Beyond the capacity-bug reproduction above, this phase's full
+admin surface was re-run against a fresh local Postgres 16 instance as
+genuine non-superuser roles:
+
+- **anonymous** can still submit directly with `status = 'NEW'` (unchanged
+  Phase 2 policy) but not with any other status; cannot read, update, or
+  delete any enquiry; cannot read, insert, update, or delete an
+  `enquiry_notes` row. A raw `INSERT ... RETURNING` as anonymous correctly
+  still fails too — the exact mechanism `submit_enquiry()` exists to work
+  around, re-confirmed here rather than only reasoned about.
+- **EDITOR** (any staff) can read every enquiry, change its status, and add
+  an internal note — but cannot delete an enquiry (0 rows affected, not an
+  error).
+- **ADMIN** can do everything EDITOR can, and deleting an enquiry both
+  succeeds and genuinely persists (confirmed by a follow-up count as
+  superuser).
+
+That verification setup is local-only scaffolding and isn't part of this
+repo or its history, same as Phases 2–5.
+
+**One thing this sandbox genuinely cannot verify**: whether supabase-js's
+`error.message` on the client reads back *exactly* the text each `RAISE
+EXCEPTION` in `submit_enquiry()`/`check_thursday_capacity()` raises (e.g.
+"This Thursday is fully booked — please choose another date."). Everything
+on the Postgres side — that the right exception fires at the right time,
+with the right text, as the right role — is fully verified above. The final
+hop (PostgREST's error passthrough into `PostgrestError.message`, which
+`Consultation.tsx` shows the patient verbatim) is documented Supabase
+behavior, not something this local-only setup, with no reachable live
+Supabase project, can independently confirm.
+
+## 14–16. Local dev, production build & deployment, security
 
 Documented as each remaining phase lands.
 
@@ -359,8 +464,9 @@ src/
                FaqAccordion, ConsultationCta
     admin/     admin-specific components (Phase 5) — AdminDataTable,
                AdminFormShell/FormSection, RepeatableList, ConfirmDialog,
-               ImageUploadField, RichTextEditor, StatusBadge,
-               StaffSection, PracticeLocationsSection
+               ImageUploadField, RichTextEditor, StatusBadge
+               (+ EnquiryStatusBadge, Phase 6), StaffSection,
+               PracticeLocationsSection
   hooks/
     useSupabaseQuery.ts     loading/error/data state for any Supabase
                             call, with a native refetch()
@@ -373,28 +479,35 @@ src/
     supabase/
       client.ts       typed Supabase client (reads VITE_SUPABASE_* env vars)
       queries.ts       every public-facing query (Phase 4) — published only
-      adminQueries.ts  every staff-side read (Phase 5) — all rows, RLS-gated
-      mutations.ts     every staff-side write (Phase 5), each logged via audit.ts
+      adminQueries.ts  every staff-side read (Phase 5/6) — all rows, RLS-gated
+      mutations.ts     every staff-side write (Phase 5/6), each logged via audit.ts
       audit.ts         best-effort audit_logs insert after a mutation
       upload.ts         Storage upload + media_assets registry insert
+      enquiry.ts        submit_enquiry() / get_thursday_availability() RPC
+                        wrappers (Phase 6) — the public form's only writes
     format.ts    ZAR currency / date formatting
     sanitize.ts  DOMPurify wrapper for rendered post HTML
     slug.ts      slugify() for auto-generated slugs
+    dates.ts     local-timezone-safe date helpers (Phase 6) — never
+                 toISOString(), which can silently shift a date by a day
   pages/
     public/  Home, About, Procedures, ProcedureDetail,
              ReconstructiveSurgery, Resources, ArticleDetail, Gallery,
-             Testimonials, Faq, Contact (Phase 4)
+             Testimonials, Faq, Contact (Phase 4), Consultation (Phase 6)
     admin/   Dashboard, WebsiteContent, About, Settings, and a
              List+Form pair per entity — procedures/, resources/,
-             Gallery*, Testimonials*, Faqs* (Phase 5)
+             Gallery*, Testimonials*, Faqs* (Phase 5), enquiries/ (Phase 6)
     auth/    Login, ForgotPassword, ResetPassword, shared AuthPageShell
   features/
     auth/   AuthProvider, useAuth, ProtectedRoute
     toast/  ToastProvider, useToast — save feedback across every admin form
   types/
     database.types.ts  generated from the schema — regenerate with `npm run db:types`
+                       (hand-patched this phase for submit_enquiry() — see
+                       its own comment in the file; this sandbox has no
+                       reachable live project to regenerate against)
     content.ts          hand-written Row-shape aliases + join types
 supabase/
   config.toml
-  migrations/  15 migrations — see README §7
+  migrations/  16 migrations — see README §7
 ```
