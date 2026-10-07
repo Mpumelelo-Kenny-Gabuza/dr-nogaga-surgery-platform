@@ -18,6 +18,7 @@ import { Gallery } from "@/pages/public/Gallery";
 import { Testimonials } from "@/pages/public/Testimonials";
 import { Faq } from "@/pages/public/Faq";
 import { Contact } from "@/pages/public/Contact";
+import { Consultation } from "@/pages/public/Consultation";
 
 // Admin — Phase 5 (CMS). The admin "About" page is aliased on import since
 // its export name collides with the public About page above; both are
@@ -37,6 +38,8 @@ import { TestimonialForm } from "@/pages/admin/TestimonialForm";
 import { FaqsList } from "@/pages/admin/FaqsList";
 import { FaqForm } from "@/pages/admin/FaqForm";
 import { Settings } from "@/pages/admin/Settings";
+import { EnquiriesList } from "@/pages/admin/enquiries/EnquiriesList";
+import { EnquiryDetail } from "@/pages/admin/enquiries/EnquiryDetail";
 
 export default function App() {
   return (
@@ -56,7 +59,7 @@ export default function App() {
         <Route path="/testimonials" element={<Testimonials />} />
         <Route path="/faq" element={<Faq />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/consultation" element={<Placeholder title="Consultation Enquiry" phase="Phase 6 — enquiry workflow" />} />
+        <Route path="/consultation" element={<Consultation />} />
         <Route path="/privacy" element={<Placeholder title="Privacy Policy" phase="Phase 9" />} />
         <Route path="/terms" element={<Placeholder title="Terms" phase="Phase 9" />} />
         <Route path="/disclaimer" element={<Placeholder title="Medical Disclaimer" phase="Phase 9" />} />
@@ -96,7 +99,8 @@ export default function App() {
         <Route path="/admin/faqs/new" element={<FaqForm />} />
         <Route path="/admin/faqs/:id" element={<FaqForm />} />
 
-        <Route path="/admin/enquiries" element={<Placeholder title="Enquiries" phase="Phase 6" />} />
+        <Route path="/admin/enquiries" element={<EnquiriesList />} />
+        <Route path="/admin/enquiries/:id" element={<EnquiryDetail />} />
 
         {/* No route-level ADMIN-only gate here beyond the sidebar hiding it —
             RLS is the real boundary (spec §22: never rely on frontend-only

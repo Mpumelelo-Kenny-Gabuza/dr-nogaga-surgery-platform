@@ -5,6 +5,7 @@ import {
   Image as ImageIcon,
   Quote,
   HelpCircle,
+  Inbox,
   ArrowRight,
 } from "lucide-react";
 import { DataState } from "@/components/public/DataState";
@@ -24,7 +25,9 @@ type Counts = {
   faqs: { total: number; published: number };
 };
 
-type DashboardData = { counts: Counts; recentActivity: AuditLogWithActor[] };
+type EnquiryCounts = { total: number; new: number };
+
+type DashboardData = { counts: Counts; enquiries: EnquiryCounts; recentActivity: AuditLogWithActor[] };
 
 async function countTable(
   table: "procedures" | "posts" | "testimonials",
@@ -45,24 +48,38 @@ async function countBooleanTable(table: "gallery_items" | "faqs") {
   return { total: total ?? 0, published: published ?? 0 };
 }
 
+// "only staff may read enquiries" (migration 20260930090800) is a plain
+// is_staff() check — unlike audit_logs this is never zero-for-a-reason for
+// a signed-in EDITOR, so (unlike loadDashboard's isAdmin branch below)
+// there's no role gate needed here.
+async function countEnquiries(): Promise<EnquiryCounts> {
+  const [{ count: total }, { count: newCount }] = await Promise.all([
+    supabase.from("enquiries").select("*", { count: "exact", head: true }),
+    supabase.from("enquiries").select("*", { count: "exact", head: true }).eq("status", "NEW"),
+  ]);
+  return { total: total ?? 0, new: newCount ?? 0 };
+}
+
 // audit_logs is ADMIN-only per RLS ("only admins may read the audit log") —
 // an EDITOR's own session gets zero rows back, not an error, which would
 // otherwise render as a misleading "No admin activity recorded yet." Skip
 // the query entirely for a non-admin rather than ask for data RLS will
 // just filter to nothing anyway.
 async function loadDashboard(isAdmin: boolean) {
-  const [procedures, posts, gallery, testimonials, faqs, activity] = await Promise.all([
+  const [procedures, posts, gallery, testimonials, faqs, enquiries, activity] = await Promise.all([
     countTable("procedures", "PUBLISHED"),
     countTable("posts", "PUBLISHED"),
     countBooleanTable("gallery_items"),
     countTable("testimonials", "PUBLISHED"),
     countBooleanTable("faqs"),
+    countEnquiries(),
     isAdmin ? getRecentAuditLogs(8) : Promise.resolve({ data: [], error: null }),
   ]);
 
   return {
     data: {
       counts: { procedures, posts, gallery, testimonials, faqs },
+      enquiries,
       recentActivity: (activity.data ?? []) as AuditLogWithActor[],
     } satisfies DashboardData,
     error: activity.error,
@@ -116,9 +133,27 @@ export function Dashboard() {
               })}
             </div>
 
-            {/* Enquiries (Phase 6) and comment moderation (Phase 7) aren't
-                built yet — deliberately no "0 new enquiries"-style card
-                here that would imply a system that doesn't exist. */}
+            {/* Comment moderation (Phase 7) isn't built yet — deliberately
+                no stub card for it. Enquiries (Phase 6) now is, so it gets
+                a real one below, driven by the same live count query as
+                the cards above rather than a fixed label. */}
+            <Link
+              to="/admin/enquiries"
+              className="group mt-4 flex items-center justify-between rounded-sm border border-line bg-white p-5 transition-colors hover:border-teal sm:max-w-xs"
+            >
+              <div>
+                <div className="flex items-center gap-2 text-teal">
+                  <Inbox size={18} />
+                  <span className="text-2xl text-ink">{data.enquiries.new}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  new of {data.enquiries.total} consultation {data.enquiries.total === 1 ? "enquiry" : "enquiries"}
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-teal opacity-0 transition-opacity group-hover:opacity-100">
+                Manage <ArrowRight size={12} />
+              </span>
+            </Link>
 
             <div className="mt-10">
               <h2 className="text-lg text-ink">Recent Activity</h2>
