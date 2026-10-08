@@ -160,6 +160,7 @@ function ContentForm({ initial }: { initial: ContentData }) {
                 label="Platform"
                 value={link.platform}
                 onChange={(e) => update({ platform: e.target.value })}
+                hint="e.g. Facebook, Instagram, LinkedIn — matched to a real icon on the site automatically"
               />
               <Field label="URL" value={link.url} onChange={(e) => update({ url: e.target.value })} />
             </div>

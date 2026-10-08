@@ -13,8 +13,11 @@ import {
   Settings,
   ExternalLink,
   LogOut,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/useAuth";
+import { useEnquiryAlerts } from "@/features/notifications/useEnquiryAlerts";
 
 const SIDEBAR_LINKS = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, adminOnly: false },
@@ -36,6 +39,10 @@ const SIDEBAR_LINKS = [
 export function AdminLayout() {
   const { profile, isAdmin, signOut } = useAuth();
   const links = SIDEBAR_LINKS.filter((link) => !link.adminOnly || isAdmin);
+  // Live for every admin page, not just /admin/enquiries, so a sound still
+  // fires while staff are working elsewhere — see the hook's own comment
+  // for how it stays RLS-safe.
+  const { muted, setMuted } = useEnquiryAlerts();
 
   return (
     <div className="min-h-screen bg-cream">
@@ -51,6 +58,18 @@ export function AdminLayout() {
           >
             View Website <ExternalLink size={14} />
           </Link>
+
+          <div className="h-5 w-px bg-white/15" />
+
+          <button
+            onClick={() => setMuted(!muted)}
+            title={muted ? "New-enquiry sound alerts are off" : "New-enquiry sound alerts are on"}
+            aria-pressed={!muted}
+            className="flex items-center gap-1.5 text-xs font-medium text-mist hover:text-white"
+          >
+            {muted ? <BellOff size={14} /> : <Bell size={14} />}
+            {muted ? "Alerts off" : "Alerts on"}
+          </button>
 
           <div className="h-5 w-px bg-white/15" />
 

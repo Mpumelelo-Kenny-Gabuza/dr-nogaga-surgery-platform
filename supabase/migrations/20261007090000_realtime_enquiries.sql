@@ -1,0 +1,18 @@
+-- ============================================================================
+-- Phase 6 follow-up: enables Supabase Realtime (Postgres Changes) on
+-- public.enquiries so the admin dashboard can play a sound alert the
+-- moment a new enquiry comes in, instead of staff having to keep
+-- refreshing /admin/enquiries — see src/features/notifications/
+-- useEnquiryAlerts.ts, wired into AdminLayout.tsx so it's live on every
+-- admin page, not just the Enquiries screen.
+--
+-- RLS is still the real boundary here, exactly like every other read path
+-- in this project: Supabase Realtime's Postgres Changes feature evaluates
+-- the subscribing connection's own RLS policies before delivering a change
+-- event, the same as a normal SELECT would. "only staff may read
+-- enquiries" (migration 20260930090800) already restricts SELECT to
+-- is_staff() — so adding this table to the publication does not open a
+-- new public read surface; an anonymous visitor's own realtime connection
+-- still receives nothing for this table, same as querying it directly.
+-- ============================================================================
+alter publication supabase_realtime add table public.enquiries;

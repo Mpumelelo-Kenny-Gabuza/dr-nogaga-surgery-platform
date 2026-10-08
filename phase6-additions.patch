@@ -1,0 +1,458 @@
+diff --git a/src/components/public/SocialLinks.tsx b/src/components/public/SocialLinks.tsx
+new file mode 100644
+index 0000000..618f656
+--- /dev/null
++++ b/src/components/public/SocialLinks.tsx
+@@ -0,0 +1,42 @@
++import clsx from "clsx";
++import { getSocialIcon } from "@/lib/socialIcons";
++import type { SocialLink } from "@/types/content";
++
++/**
++ * Icon-only social links, shared by the site footer and the Contact page —
++ * one place rendering real `social_links` rows (never a hardcoded
++ * Facebook/Instagram pair), so an unpublished or not-yet-added platform
++ * correctly shows nothing rather than a dead icon.
++ */
++export function SocialLinks({
++  links,
++  className,
++  iconClassName,
++}: {
++  links: SocialLink[];
++  className?: string;
++  iconClassName?: string;
++}) {
++  if (links.length === 0) return null;
++
++  return (
++    <div className={clsx("flex items-center gap-3", className)}>
++      {links.map((link) => {
++        const Icon = getSocialIcon(link.platform);
++        return (
++          <a
++            key={link.id}
++            href={link.url}
++            target="_blank"
++            rel="noopener noreferrer"
++            aria-label={link.platform}
++            title={link.platform}
++            className={iconClassName}
++          >
++            <Icon size={16} aria-hidden />
++          </a>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/src/components/public/WhatsAppButton.tsx b/src/components/public/WhatsAppButton.tsx
+new file mode 100644
+index 0000000..e8dde89
+--- /dev/null
++++ b/src/components/public/WhatsAppButton.tsx
+@@ -0,0 +1,32 @@
++import { MessageCircle } from "lucide-react";
++
++/**
++ * Site-wide floating WhatsApp button (per the practice's request). Renders
++ * nothing if there's no real WhatsApp number yet — never a dead/placeholder
++ * link, same "no fake functionality" rule every public page follows.
++ * `whatsapp` should already be the practice's real number (site_settings.
++ * contact_whatsapp, falling back to the first published location's own
++ * number — see PublicLayout.tsx, the same fallback Contact.tsx/Footer use).
++ */
++export function WhatsAppButton({ whatsapp }: { whatsapp: string | null | undefined }) {
++  if (!whatsapp) return null;
++
++  const digits = whatsapp.replace(/\D/g, "");
++  const message = encodeURIComponent(
++    "Hi, I'd like to enquire about a consultation with Dr Nogaga."
++  );
++
++  return (
++    <a
++      href={`https://wa.me/${digits}?text=${message}`}
++      target="_blank"
++      rel="noopener noreferrer"
++      aria-label="Chat with us on WhatsApp"
++      title="Chat on WhatsApp"
++      className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-lg transition-transform hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#25D366] focus-visible:ring-offset-2"
++    >
++      <MessageCircle size={28} strokeWidth={2} aria-hidden />
++      <span className="sr-only">Chat with us on WhatsApp</span>
++    </a>
++  );
++}
+diff --git a/src/features/notifications/useEnquiryAlerts.ts b/src/features/notifications/useEnquiryAlerts.ts
+new file mode 100644
+index 0000000..a1f0a36
+--- /dev/null
++++ b/src/features/notifications/useEnquiryAlerts.ts
+@@ -0,0 +1,116 @@
++import { useEffect, useRef, useState } from "react";
++import { supabase } from "@/lib/supabase/client";
++import { useToast } from "@/features/toast/useToast";
++import type { Database } from "@/types/database.types";
++
++type EnquiryRow = Database["public"]["Tables"]["enquiries"]["Row"];
++
++const MUTE_KEY = "admin:enquiry-alerts-muted";
++
++function readMuted(): boolean {
++  try {
++    return localStorage.getItem(MUTE_KEY) === "1";
++  } catch {
++    // Private-browsing/storage-blocked — default to sound on rather than
++    // fail the whole alert over a per-viewer convenience setting.
++    return false;
++  }
++}
++
++function writeMuted(muted: boolean) {
++  try {
++    localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
++  } catch {
++    // Same as above — losing the saved preference is fine, it just resets
++    // to "on" next visit rather than breaking anything.
++  }
++}
++
++/**
++ * A short two-tone chime, synthesized with the Web Audio API rather than
++ * shipped as an audio file — nothing to license, host, or go missing from
++ * the build. Failures here (an unsupported browser, or the autoplay
++ * restriction every browser applies before the person has interacted with
++ * the page at all) are swallowed on purpose: the toast below still fires
++ * either way, so a missing chime is a quieter miss, not a broken alert.
++ */
++function playChime() {
++  try {
++    // Unprefixed AudioContext has been available in every browser this
++    // project otherwise supports for years now — no webkit-prefixed
++    // fallback needed (and skipping it avoids reaching for `any`).
++    const ctx = new AudioContext();
++    const now = ctx.currentTime;
++
++    [880, 1320].forEach((freq, i) => {
++      const osc = ctx.createOscillator();
++      const gain = ctx.createGain();
++      osc.type = "sine";
++      osc.frequency.value = freq;
++
++      const start = now + i * 0.14;
++      gain.gain.setValueAtTime(0, start);
++      gain.gain.linearRampToValueAtTime(0.2, start + 0.015);
++      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.32);
++
++      osc.connect(gain);
++      gain.connect(ctx.destination);
++      osc.start(start);
++      osc.stop(start + 0.35);
++    });
++
++    setTimeout(() => ctx.close(), 700);
++  } catch {
++    // See comment above — never let this block the toast.
++  }
++}
++
++/**
++ * Subscribes to real INSERTs on public.enquiries (migration
++ * 20261007090000_realtime_enquiries.sql) for as long as the calling
++ * component — AdminLayout, so it's active across every admin page — stays
++ * mounted. RLS decides what this connection actually receives; see that
++ * migration's header for why that's safe to rely on here, same as every
++ * other read in this app.
++ */
++export function useEnquiryAlerts() {
++  const toast = useToast();
++  const [muted, setMutedState] = useState(readMuted);
++  const mutedRef = useRef(muted);
++
++  useEffect(() => {
++    mutedRef.current = muted;
++  }, [muted]);
++
++  useEffect(() => {
++    const channel = supabase
++      .channel("admin-enquiry-alerts")
++      .on(
++        "postgres_changes",
++        { event: "INSERT", schema: "public", table: "enquiries" },
++        (payload) => {
++          const row = payload.new as EnquiryRow;
++          if (!mutedRef.current) playChime();
++          toast.show(
++            "success",
++            `New enquiry from ${row.first_name} ${row.surname} (${row.reference})`
++          );
++        }
++      )
++      .subscribe();
++
++    return () => {
++      supabase.removeChannel(channel);
++    };
++    // toast.show is stable (useCallback, see ToastProvider.tsx) — this
++    // subscribes exactly once per AdminLayout mount, not once per toast.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, []);
++
++  function setMuted(next: boolean) {
++    setMutedState(next);
++    writeMuted(next);
++  }
++
++  return { muted, setMuted };
++}
+diff --git a/src/layouts/AdminLayout.tsx b/src/layouts/AdminLayout.tsx
+index 1dfda64..0ca2015 100644
+--- a/src/layouts/AdminLayout.tsx
++++ b/src/layouts/AdminLayout.tsx
+@@ -13,8 +13,11 @@ import {
+   Settings,
+   ExternalLink,
+   LogOut,
++  Bell,
++  BellOff,
+ } from "lucide-react";
+ import { useAuth } from "@/features/auth/useAuth";
++import { useEnquiryAlerts } from "@/features/notifications/useEnquiryAlerts";
+ 
+ const SIDEBAR_LINKS = [
+   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true, adminOnly: false },
+@@ -36,6 +39,10 @@ const SIDEBAR_LINKS = [
+ export function AdminLayout() {
+   const { profile, isAdmin, signOut } = useAuth();
+   const links = SIDEBAR_LINKS.filter((link) => !link.adminOnly || isAdmin);
++  // Live for every admin page, not just /admin/enquiries, so a sound still
++  // fires while staff are working elsewhere — see the hook's own comment
++  // for how it stays RLS-safe.
++  const { muted, setMuted } = useEnquiryAlerts();
+ 
+   return (
+     <div className="min-h-screen bg-cream">
+@@ -54,6 +61,18 @@ export function AdminLayout() {
+ 
+           <div className="h-5 w-px bg-white/15" />
+ 
++          <button
++            onClick={() => setMuted(!muted)}
++            title={muted ? "New-enquiry sound alerts are off" : "New-enquiry sound alerts are on"}
++            aria-pressed={!muted}
++            className="flex items-center gap-1.5 text-xs font-medium text-mist hover:text-white"
++          >
++            {muted ? <BellOff size={14} /> : <Bell size={14} />}
++            {muted ? "Alerts off" : "Alerts on"}
++          </button>
++
++          <div className="h-5 w-px bg-white/15" />
++
+           <span className="text-xs text-mist">
+             {profile?.full_name || "Account"}
+             <span className="ml-1.5 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">
+diff --git a/src/layouts/PublicLayout.tsx b/src/layouts/PublicLayout.tsx
+index 1bfd780..c99b430 100644
+--- a/src/layouts/PublicLayout.tsx
++++ b/src/layouts/PublicLayout.tsx
+@@ -5,9 +5,11 @@ import clsx from "clsx";
+ import { Logo } from "@/components/ui/Logo";
+ import { buttonClasses } from "@/components/ui/Button";
+ import { Container } from "@/components/ui/Container";
++import { SocialLinks } from "@/components/public/SocialLinks";
++import { WhatsAppButton } from "@/components/public/WhatsAppButton";
+ import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
+-import { getPracticeLocations, getSiteSettings } from "@/lib/supabase/queries";
+-import type { PracticeLocation, SiteSettings } from "@/types/content";
++import { getPracticeLocations, getSiteSettings, getSocialLinks } from "@/lib/supabase/queries";
++import type { PracticeLocation, SiteSettings, SocialLink } from "@/types/content";
+ 
+ const NAV_LINKS = [
+   { to: "/about", label: "About" },
+@@ -43,6 +45,14 @@ function NavLinks({ onNavigate, className }: { onNavigate?: () => void; classNam
+ export function PublicLayout() {
+   const [menuOpen, setMenuOpen] = useState(false);
+ 
++  // Lifted up from Footer so the floating WhatsApp button (needs the same
++  // real contact number) doesn't have to fire a second, duplicate query for
++  // data the Footer is already fetching on every page.
++  const { data } = useSupabaseQuery<FooterData>(loadFooterData, []);
++  const settings = data?.settings;
++  const primaryLocation = data?.locations[0];
++  const whatsapp = settings?.contact_whatsapp ?? primaryLocation?.whatsapp ?? null;
++
+   return (
+     <div className="flex min-h-screen flex-col bg-white">
+       <div className="bg-ink px-6 py-2 text-right text-xs tracking-wide text-mist md:px-10">
+@@ -91,29 +101,47 @@ export function PublicLayout() {
+         <Outlet />
+       </main>
+ 
+-      <Footer />
++      <Footer settings={settings} primaryLocation={primaryLocation} socialLinks={data?.socialLinks ?? []} />
++      <WhatsAppButton whatsapp={whatsapp} />
+     </div>
+   );
+ }
+ 
+-type FooterData = { settings: SiteSettings | null; locations: PracticeLocation[] };
++type FooterData = {
++  settings: SiteSettings | null;
++  locations: PracticeLocation[];
++  socialLinks: SocialLink[];
++};
+ 
+ async function loadFooterData() {
+-  const [settings, locations] = await Promise.all([getSiteSettings(), getPracticeLocations()]);
++  const [settings, locations, socialLinks] = await Promise.all([
++    getSiteSettings(),
++    getPracticeLocations(),
++    getSocialLinks(),
++  ]);
+   return {
+-    data: { settings: settings.data, locations: locations.data ?? [] } satisfies FooterData,
+-    error: locations.error ?? null,
++    data: {
++      settings: settings.data,
++      locations: locations.data ?? [],
++      socialLinks: socialLinks.data ?? [],
++    } satisfies FooterData,
++    error: locations.error ?? socialLinks.error ?? null,
+   };
+ }
+ 
+-function Footer() {
++function Footer({
++  settings,
++  primaryLocation,
++  socialLinks,
++}: {
++  settings: SiteSettings | null | undefined;
++  primaryLocation: PracticeLocation | undefined;
++  socialLinks: SocialLink[];
++}) {
+   // Real contact details, same source as the Contact page (site_settings +
+   // practice_locations) — replaces the Phase 1 "To be confirmed" stand-in
+-  // now that the practice has confirmed its locations and email.
+-  const { data } = useSupabaseQuery<FooterData>(loadFooterData, []);
+-  const settings = data?.settings;
+-  const primaryLocation = data?.locations[0];
+-
++  // now that the practice has confirmed its locations and email. Fetched
++  // once in PublicLayout and passed down (see above) rather than here.
+   return (
+     <footer className="bg-ink text-mist">
+       <Container className="grid gap-10 py-16 md:grid-cols-4">
+@@ -123,6 +151,11 @@ function Footer() {
+             Specialist plastic and reconstructive surgery, focused on restoring function,
+             confidence and quality of life.
+           </p>
++          <SocialLinks
++            links={socialLinks}
++            className="mt-5"
++            iconClassName="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-mist transition-colors hover:bg-white/15 hover:text-white"
++          />
+         </div>
+ 
+         <div>
+diff --git a/src/lib/socialIcons.ts b/src/lib/socialIcons.ts
+new file mode 100644
+index 0000000..48d8e96
+--- /dev/null
++++ b/src/lib/socialIcons.ts
+@@ -0,0 +1,19 @@
++import { Facebook, Instagram, Linkedin, Twitter, Youtube, Globe } from "lucide-react";
++
++// social_links.platform is free text (set by staff in the admin — see
++// WebsiteContent.tsx), not an enum, so there's nothing in the schema to
++// switch on directly. This matches the common names staff would actually
++// type to a recognizable icon; anything else still gets a real link, just
++// with a generic globe icon instead of a blank one.
++const ICONS: Record<string, typeof Facebook> = {
++  facebook: Facebook,
++  instagram: Instagram,
++  linkedin: Linkedin,
++  twitter: Twitter,
++  x: Twitter,
++  youtube: Youtube,
++};
++
++export function getSocialIcon(platform: string): typeof Facebook {
++  return ICONS[platform.trim().toLowerCase()] ?? Globe;
++}
+diff --git a/src/pages/admin/WebsiteContent.tsx b/src/pages/admin/WebsiteContent.tsx
+index 604dbd7..8c590af 100644
+--- a/src/pages/admin/WebsiteContent.tsx
++++ b/src/pages/admin/WebsiteContent.tsx
+@@ -160,6 +160,7 @@ function ContentForm({ initial }: { initial: ContentData }) {
+                 label="Platform"
+                 value={link.platform}
+                 onChange={(e) => update({ platform: e.target.value })}
++                hint="e.g. Facebook, Instagram, LinkedIn — matched to a real icon on the site automatically"
+               />
+               <Field label="URL" value={link.url} onChange={(e) => update({ url: e.target.value })} />
+             </div>
+diff --git a/src/pages/public/Contact.tsx b/src/pages/public/Contact.tsx
+index 5e50979..832f455 100644
+--- a/src/pages/public/Contact.tsx
++++ b/src/pages/public/Contact.tsx
+@@ -2,6 +2,7 @@ import { Mail, MapPin, MessageCircle, Phone } from "lucide-react";
+ import { PageHero } from "@/components/public/PageHero";
+ import { Container } from "@/components/ui/Container";
+ import { DataState } from "@/components/public/DataState";
++import { SocialLinks } from "@/components/public/SocialLinks";
+ import { usePageMeta } from "@/hooks/usePageMeta";
+ import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
+ import { getPracticeLocations, getSiteSettings, getSocialLinks } from "@/lib/supabase/queries";
+@@ -74,21 +75,11 @@ function ContactView({ data }: { data: ContactData }) {
+           </div>
+         )}
+ 
+-        {socialLinks.length > 0 && (
+-          <div className="flex gap-4 pt-2">
+-            {socialLinks.map((link) => (
+-              <a
+-                key={link.id}
+-                href={link.url}
+-                target="_blank"
+-                rel="noopener noreferrer"
+-                className="text-sm font-medium text-teal hover:underline"
+-              >
+-                {link.platform}
+-              </a>
+-            ))}
+-          </div>
+-        )}
++        <SocialLinks
++          links={socialLinks}
++          className="pt-2"
++          iconClassName="flex h-9 w-9 items-center justify-center rounded-full border border-line text-teal transition-colors hover:border-teal hover:bg-mist/40"
++        />
+ 
+         {settings?.map_embed_url && (
+           <div className="overflow-hidden rounded-sm border border-line pt-4">
+diff --git a/supabase/migrations/20261007090000_realtime_enquiries.sql b/supabase/migrations/20261007090000_realtime_enquiries.sql
+new file mode 100644
+index 0000000..98b2266
+--- /dev/null
++++ b/supabase/migrations/20261007090000_realtime_enquiries.sql
+@@ -0,0 +1,18 @@
++-- ============================================================================
++-- Phase 6 follow-up: enables Supabase Realtime (Postgres Changes) on
++-- public.enquiries so the admin dashboard can play a sound alert the
++-- moment a new enquiry comes in, instead of staff having to keep
++-- refreshing /admin/enquiries — see src/features/notifications/
++-- useEnquiryAlerts.ts, wired into AdminLayout.tsx so it's live on every
++-- admin page, not just the Enquiries screen.
++--
++-- RLS is still the real boundary here, exactly like every other read path
++-- in this project: Supabase Realtime's Postgres Changes feature evaluates
++-- the subscribing connection's own RLS policies before delivering a change
++-- event, the same as a normal SELECT would. "only staff may read
++-- enquiries" (migration 20260930090800) already restricts SELECT to
++-- is_staff() — so adding this table to the publication does not open a
++-- new public read surface; an anonymous visitor's own realtime connection
++-- still receives nothing for this table, same as querying it directly.
++-- ============================================================================
++alter publication supabase_realtime add table public.enquiries;
