@@ -2,6 +2,7 @@ import { Mail, MapPin, MessageCircle, Phone } from "lucide-react";
 import { PageHero } from "@/components/public/PageHero";
 import { Container } from "@/components/ui/Container";
 import { DataState } from "@/components/public/DataState";
+import { SocialLinks } from "@/components/public/SocialLinks";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
 import { getPracticeLocations, getSiteSettings, getSocialLinks } from "@/lib/supabase/queries";
@@ -74,21 +75,11 @@ function ContactView({ data }: { data: ContactData }) {
           </div>
         )}
 
-        {socialLinks.length > 0 && (
-          <div className="flex gap-4 pt-2">
-            {socialLinks.map((link) => (
-              <a
-                key={link.id}
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-teal hover:underline"
-              >
-                {link.platform}
-              </a>
-            ))}
-          </div>
-        )}
+        <SocialLinks
+          links={socialLinks}
+          className="pt-2"
+          iconClassName="flex h-9 w-9 items-center justify-center rounded-full border border-line text-teal transition-colors hover:border-teal hover:bg-mist/40"
+        />
 
         {settings?.map_embed_url && (
           <div className="overflow-hidden rounded-sm border border-line pt-4">

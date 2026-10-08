@@ -5,9 +5,11 @@ import clsx from "clsx";
 import { Logo } from "@/components/ui/Logo";
 import { buttonClasses } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
+import { SocialLinks } from "@/components/public/SocialLinks";
+import { WhatsAppButton } from "@/components/public/WhatsAppButton";
 import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
-import { getPracticeLocations, getSiteSettings } from "@/lib/supabase/queries";
-import type { PracticeLocation, SiteSettings } from "@/types/content";
+import { getPracticeLocations, getSiteSettings, getSocialLinks } from "@/lib/supabase/queries";
+import type { PracticeLocation, SiteSettings, SocialLink } from "@/types/content";
 
 const NAV_LINKS = [
   { to: "/about", label: "About" },
@@ -42,6 +44,14 @@ function NavLinks({ onNavigate, className }: { onNavigate?: () => void; classNam
 
 export function PublicLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Lifted up from Footer so the floating WhatsApp button (needs the same
+  // real contact number) doesn't have to fire a second, duplicate query for
+  // data the Footer is already fetching on every page.
+  const { data } = useSupabaseQuery<FooterData>(loadFooterData, []);
+  const settings = data?.settings;
+  const primaryLocation = data?.locations[0];
+  const whatsapp = settings?.contact_whatsapp ?? primaryLocation?.whatsapp ?? null;
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -91,29 +101,47 @@ export function PublicLayout() {
         <Outlet />
       </main>
 
-      <Footer />
+      <Footer settings={settings} primaryLocation={primaryLocation} socialLinks={data?.socialLinks ?? []} />
+      <WhatsAppButton whatsapp={whatsapp} />
     </div>
   );
 }
 
-type FooterData = { settings: SiteSettings | null; locations: PracticeLocation[] };
+type FooterData = {
+  settings: SiteSettings | null;
+  locations: PracticeLocation[];
+  socialLinks: SocialLink[];
+};
 
 async function loadFooterData() {
-  const [settings, locations] = await Promise.all([getSiteSettings(), getPracticeLocations()]);
+  const [settings, locations, socialLinks] = await Promise.all([
+    getSiteSettings(),
+    getPracticeLocations(),
+    getSocialLinks(),
+  ]);
   return {
-    data: { settings: settings.data, locations: locations.data ?? [] } satisfies FooterData,
-    error: locations.error ?? null,
+    data: {
+      settings: settings.data,
+      locations: locations.data ?? [],
+      socialLinks: socialLinks.data ?? [],
+    } satisfies FooterData,
+    error: locations.error ?? socialLinks.error ?? null,
   };
 }
 
-function Footer() {
+function Footer({
+  settings,
+  primaryLocation,
+  socialLinks,
+}: {
+  settings: SiteSettings | null | undefined;
+  primaryLocation: PracticeLocation | undefined;
+  socialLinks: SocialLink[];
+}) {
   // Real contact details, same source as the Contact page (site_settings +
   // practice_locations) — replaces the Phase 1 "To be confirmed" stand-in
-  // now that the practice has confirmed its locations and email.
-  const { data } = useSupabaseQuery<FooterData>(loadFooterData, []);
-  const settings = data?.settings;
-  const primaryLocation = data?.locations[0];
-
+  // now that the practice has confirmed its locations and email. Fetched
+  // once in PublicLayout and passed down (see above) rather than here.
   return (
     <footer className="bg-ink text-mist">
       <Container className="grid gap-10 py-16 md:grid-cols-4">
@@ -123,6 +151,11 @@ function Footer() {
             Specialist plastic and reconstructive surgery, focused on restoring function,
             confidence and quality of life.
           </p>
+          <SocialLinks
+            links={socialLinks}
+            className="mt-5"
+            iconClassName="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-mist transition-colors hover:bg-white/15 hover:text-white"
+          />
         </div>
 
         <div>
