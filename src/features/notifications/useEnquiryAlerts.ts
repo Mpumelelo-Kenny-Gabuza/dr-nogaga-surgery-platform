@@ -41,7 +41,9 @@ function playChime() {
     // fallback needed (and skipping it avoids reaching for `any`).
     const ctx = new AudioContext();
     const now = ctx.currentTime;
-
+    if (ctx.state === "suspended") {
+      ctx.resume();
+    }
     [880, 1320].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -93,9 +95,9 @@ export function useEnquiryAlerts() {
           if (!mutedRef.current) playChime();
           toast.show(
             "success",
-            `New enquiry from ${row.first_name} ${row.surname} (${row.reference})`
+            `New enquiry from ${row.first_name} ${row.surname} (${row.reference})`,
           );
-        }
+        },
       )
       .subscribe();
 
