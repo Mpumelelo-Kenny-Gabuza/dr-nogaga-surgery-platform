@@ -23,6 +23,8 @@ export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type AuditLog = Database["public"]["Tables"]["audit_logs"]["Row"];
 export type Enquiry = Database["public"]["Tables"]["enquiries"]["Row"];
 export type EnquiryNote = Database["public"]["Tables"]["enquiry_notes"]["Row"];
+export type Comment = Database["public"]["Tables"]["comments"]["Row"];
+export type PostLike = Database["public"]["Tables"]["post_likes"]["Row"];
 
 export type ProcedureWithCategory = Procedure & {
   procedure_categories: Pick<ProcedureCategory, "id" | "name" | "slug"> | null;
@@ -47,6 +49,19 @@ export type EnquiryWithLocation = Enquiry & {
 
 export type EnquiryNoteWithAuthor = EnquiryNote & {
   profiles: { full_name: string | null } | null;
+};
+
+/**
+ * A top-level comment with its replies already gathered under it (one
+ * visual level, however deep parent_comment_id actually chains — see
+ * CommentSection.tsx's groupThread for why that's a deliberate choice, not
+ * a limitation of the schema itself).
+ */
+export type CommentWithReplies = Comment & { replies: Comment[] };
+
+/** The admin moderation queue's shape — every comment is flat here, each tagged with which post it belongs to. */
+export type CommentWithPost = Comment & {
+  posts: { id: string; title: string; slug: string } | null;
 };
 
 /** One step of homepage_content.patient_journey (jsonb array). */

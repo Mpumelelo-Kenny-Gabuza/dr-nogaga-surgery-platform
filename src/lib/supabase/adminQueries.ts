@@ -134,3 +134,16 @@ export function getEnquiryNotes(enquiryId: string) {
     .eq("enquiry_id", enquiryId)
     .order("created_at", { ascending: false });
 }
+
+// ----------------------------------------------------------------------------
+// Comments (Phase 7) — "approved comments are publicly readable ... or
+// is_staff()" (migration 20260930090800) means this returns every status,
+// not just APPROVED, for a signed-in staff session; that's the moderation
+// queue itself. Newest first, same convention as getAllEnquiries.
+// ----------------------------------------------------------------------------
+export function getAllComments() {
+  return supabase
+    .from("comments")
+    .select("*, posts(id, title, slug)")
+    .order("created_at", { ascending: false });
+}

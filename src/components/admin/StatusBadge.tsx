@@ -56,3 +56,25 @@ export function EnquiryStatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+
+// Comment moderation (Phase 7) — its own enum/style map, same reasoning as
+// ENQUIRY_STATUS_STYLES above.
+const COMMENT_STATUS_STYLES: Record<string, string> = {
+  PENDING: "bg-amber-50 text-amber-700",
+  APPROVED: "bg-teal/10 text-teal-dark",
+  REJECTED: "bg-line text-muted",
+  HIDDEN: "bg-red-50 text-red-700",
+};
+
+export function CommentStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium",
+        COMMENT_STATUS_STYLES[status] ?? "bg-line text-muted"
+      )}
+    >
+      {status}
+    </span>
+  );
+}

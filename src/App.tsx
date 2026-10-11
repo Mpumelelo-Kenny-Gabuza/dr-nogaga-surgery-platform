@@ -40,6 +40,7 @@ import { FaqForm } from "@/pages/admin/FaqForm";
 import { Settings } from "@/pages/admin/Settings";
 import { EnquiriesList } from "@/pages/admin/enquiries/EnquiriesList";
 import { EnquiryDetail } from "@/pages/admin/enquiries/EnquiryDetail";
+import { CommentsList } from "@/pages/admin/comments/CommentsList";
 
 export default function App() {
   return (
@@ -51,8 +52,8 @@ export default function App() {
         <Route path="/procedures" element={<Procedures />} />
         <Route path="/procedures/:slug" element={<ProcedureDetail />} />
         <Route path="/reconstructive-surgery" element={<ReconstructiveSurgery />} />
-        {/* Engagement (likes, comments, sharing) lands in Phase 7 — these
-            two render real published content read-only until then. */}
+        {/* Engagement (likes, comments, sharing — Phase 7) lives on
+            ArticleDetail itself; see its own imports. */}
         <Route path="/resources" element={<Resources />} />
         <Route path="/resources/:slug" element={<ArticleDetail />} />
         <Route path="/gallery" element={<Gallery />} />
@@ -85,7 +86,7 @@ export default function App() {
         <Route path="/admin/resources/new" element={<PostForm />} />
         <Route path="/admin/resources/:id" element={<PostForm />} />
 
-        <Route path="/admin/comments" element={<Placeholder title="Comments" phase="Phase 7 — moderation" />} />
+        <Route path="/admin/comments" element={<CommentsList />} />
 
         <Route path="/admin/gallery" element={<GalleryList />} />
         <Route path="/admin/gallery/new" element={<GalleryForm />} />

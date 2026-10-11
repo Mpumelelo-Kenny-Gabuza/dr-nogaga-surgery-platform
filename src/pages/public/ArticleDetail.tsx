@@ -2,30 +2,41 @@ import { useParams, Link } from "react-router-dom";
 import { Container } from "@/components/ui/Container";
 import { buttonClasses } from "@/components/ui/Button";
 import { DataState } from "@/components/public/DataState";
+import { LikeButton } from "@/components/public/LikeButton";
+import { ShareButtons } from "@/components/public/ShareButtons";
+import { CommentSection } from "@/components/public/CommentSection";
 import { usePageMeta } from "@/hooks/usePageMeta";
 import { useSupabaseQuery } from "@/hooks/useSupabaseQuery";
-import { getPostBySlug, getPostTags } from "@/lib/supabase/queries";
+import { getApprovedComments, getPostBySlug, getPostTags } from "@/lib/supabase/queries";
 import { formatDate } from "@/lib/format";
 import { sanitizeHtml } from "@/lib/sanitize";
-import type { PostWithRelations } from "@/types/content";
+import type { Comment, PostWithRelations } from "@/types/content";
 
 type ArticleData = {
   post: PostWithRelations;
   tags: { id: string; name: string; slug: string }[];
+  comments: Comment[];
 };
 
 async function loadArticle(slug: string) {
   const { data: post, error } = await getPostBySlug(slug);
   if (error || !post) return { data: null, error };
 
-  const { data: tagLinks } = await getPostTags(post.id);
+  const [{ data: tagLinks }, { data: comments, error: commentsError }] = await Promise.all([
+    getPostTags(post.id),
+    getApprovedComments(post.id),
+  ]);
   const tags = (tagLinks ?? [])
     .map((link) => link.post_tags)
     .filter((t): t is { id: string; name: string; slug: string } => Boolean(t));
 
   return {
-    data: { post: post as PostWithRelations, tags } satisfies ArticleData,
-    error: null,
+    data: {
+      post: post as PostWithRelations,
+      tags,
+      comments: comments ?? [],
+    } satisfies ArticleData,
+    error: commentsError,
   };
 }
 
@@ -58,8 +69,9 @@ export function ArticleDetail() {
 }
 
 function ArticleView({ data }: { data: ArticleData }) {
-  const { post, tags } = data;
+  const { post, tags, comments } = data;
   const published = formatDate(post.published_at);
+  const shareUrl = post.canonical_url || (typeof window !== "undefined" ? window.location.href : "");
 
   return (
     <article>
@@ -116,9 +128,12 @@ function ArticleView({ data }: { data: ArticleData }) {
           </div>
         )}
 
-        {/* Likes, comments and sharing land in Phase 7 (see App.tsx route
-            comment) — this is deliberately a read-only article for now,
-            not a stubbed-out comment box that doesn't actually save anything. */}
+        <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
+          <LikeButton postId={post.id} />
+          <ShareButtons url={shareUrl} title={post.title} />
+        </div>
+
+        <CommentSection postId={post.id} comments={comments} />
       </Container>
     </article>
   );
