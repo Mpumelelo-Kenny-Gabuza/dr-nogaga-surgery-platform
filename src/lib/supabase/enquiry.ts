@@ -26,20 +26,36 @@ export type SubmitEnquiryInput = {
   consent: boolean;
 };
 
-/** Returns { id, reference } on success — reference is the human-friendly ENQ-YYYY-NNNNN shown to the patient. */
+/**
+ * Returns { id, reference } on success — reference is the human-friendly
+ * ENQ-YYYY-NNNNN shown to the patient.
+ *
+ * The `?? undefined` conversions below exist because of how Supabase's own
+ * type generator represents a `default null` RPC parameter (migration
+ * 20261009090000_submit_enquiry_optional_params.sql): it marks the
+ * property optional (`p_email?: string`) but does NOT union it with
+ * `null` the way a nullable table column gets `| null` — so TypeScript
+ * accepts the key being omitted, but not an explicit `null` value.
+ * `SubmitEnquiryInput` still uses `null` throughout (it's the natural
+ * "no value" state for a controlled form field), so this is the one place
+ * that gets translated. Functionally identical either way: supabase-js
+ * JSON-serializes the call, which drops `undefined` properties entirely,
+ * and an RPC call that omits a defaulted parameter gets the same `null`
+ * Postgres would've used for an explicit one.
+ */
 export function submitEnquiry(input: SubmitEnquiryInput) {
   return supabase
     .rpc("submit_enquiry", {
       p_first_name: input.firstName,
       p_surname: input.surname,
       p_phone: input.phone,
-      p_email: input.email,
+      p_email: input.email ?? undefined,
       p_preferred_contact_method: input.preferredContactMethod,
-      p_area_of_enquiry: input.areaOfEnquiry,
-      p_practice_location_id: input.practiceLocationId,
+      p_area_of_enquiry: input.areaOfEnquiry ?? undefined,
+      p_practice_location_id: input.practiceLocationId ?? undefined,
       p_appointment_type: input.appointmentType,
-      p_preferred_date: input.preferredDate,
-      p_message: input.message,
+      p_preferred_date: input.preferredDate ?? undefined,
+      p_message: input.message ?? undefined,
       p_consent: input.consent,
     })
     .single();

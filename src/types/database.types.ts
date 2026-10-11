@@ -1114,15 +1114,15 @@ export type Database = {
       submit_enquiry: {
         Args: {
           p_appointment_type: Database["public"]["Enums"]["appointment_type"]
-          p_area_of_enquiry: string
+          p_area_of_enquiry?: string
           p_consent: boolean
-          p_email: string
+          p_email?: string
           p_first_name: string
-          p_message: string
+          p_message?: string
           p_phone: string
-          p_practice_location_id: string
+          p_practice_location_id?: string
           p_preferred_contact_method: Database["public"]["Enums"]["preferred_contact_method"]
-          p_preferred_date: string
+          p_preferred_date?: string
           p_surname: string
         }
         Returns: {

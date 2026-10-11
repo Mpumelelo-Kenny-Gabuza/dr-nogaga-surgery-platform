@@ -11,9 +11,15 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     const inputId = id ?? props.name;
     return (
       <div>
-        <label htmlFor={inputId} className="block text-sm font-medium text-ink">
-          {label}
-        </label>
+        {/* An empty label (e.g. a compact inline control that already has a
+            visible column header elsewhere, with its name instead passed as
+            aria-label) skips the element entirely rather than rendering a
+            blank one — every other call site passes a real label as before. */}
+        {label && (
+          <label htmlFor={inputId} className="block text-sm font-medium text-ink">
+            {label}
+          </label>
+        )}
         <select
           ref={ref}
           id={inputId}

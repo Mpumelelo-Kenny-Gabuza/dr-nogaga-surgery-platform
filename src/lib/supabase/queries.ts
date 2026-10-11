@@ -144,6 +144,49 @@ export function getPostTags(postId: string) {
 }
 
 // ----------------------------------------------------------------------------
+// Engagement (Phase 7) — likes and comments on a published post. Writes for
+// both live in src/lib/supabase/engagement.ts, not mutations.ts (that file
+// is the admin CMS's write path specifically) — same separation as the
+// public consultation form's enquiry.ts.
+// ----------------------------------------------------------------------------
+
+/**
+ * Only ever returns APPROVED rows for an anonymous visitor — RLS already
+ * guarantees that ("approved comments are publicly readable", migration
+ * 20260930090800), but filtering explicitly here too means a signed-in
+ * staff member reading this same article on the live site doesn't see
+ * PENDING/REJECTED/HIDDEN comments mixed into the real thread just because
+ * is_staff() would let them. Moderation happens in the admin queue, not
+ * inline on the article.
+ */
+export function getApprovedComments(postId: string) {
+  return supabase
+    .from("comments")
+    .select("*")
+    .eq("post_id", postId)
+    .eq("status", "APPROVED")
+    .order("created_at", { ascending: true });
+}
+
+/** Real count, not an estimate — head:true means no rows are actually transferred, same pattern as Dashboard.tsx's countTable. */
+export function getPostLikeCount(postId: string) {
+  return supabase
+    .from("post_likes")
+    .select("*", { count: "exact", head: true })
+    .eq("post_id", postId);
+}
+
+/**
+ * Whether THIS viewer has already liked the post — checked against exactly
+ * one of the two identity columns, matching the "anyone may like a post"
+ * policy's own user_id-xor-anon_key shape (migration 20260930090800).
+ */
+export function getViewerLike(postId: string, identity: { userId: string } | { anonKey: string }) {
+  const query = supabase.from("post_likes").select("id").eq("post_id", postId);
+  return ("userId" in identity ? query.eq("user_id", identity.userId) : query.eq("anon_key", identity.anonKey)).maybeSingle();
+}
+
+// ----------------------------------------------------------------------------
 // Gallery / Testimonials / FAQs
 // ----------------------------------------------------------------------------
 export function getGalleryItems() {

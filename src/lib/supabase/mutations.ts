@@ -428,3 +428,63 @@ export async function addEnquiryNote(enquiryId: string, note: string) {
   if (data) await logAction("CREATE", "enquiry_notes", data.id, { enquiry_id: enquiryId });
   return { data, error };
 }
+
+// ----------------------------------------------------------------------------
+// Comments (Phase 7) — moderation is any-staff per RLS ("staff moderate
+// comments" / "staff delete comments", both plain is_staff() checks, no
+// ADMIN-only gate here the way enquiry deletion has one).
+// ----------------------------------------------------------------------------
+export async function updateCommentStatus(
+  id: string,
+  status: Database["public"]["Enums"]["comment_status"]
+) {
+  const { data, error } = await supabase
+    .from("comments")
+    .update({ status })
+    .eq("id", id)
+    .select("*, posts(id, title, slug)")
+    .single();
+  if (data) await logAction("UPDATE", "comments", id, { status });
+  return { data, error };
+}
+
+export async function deleteComment(id: string) {
+  const { error } = await supabase.from("comments").delete().eq("id", id);
+  if (!error) await logAction("DELETE", "comments", id);
+  return { error };
+}
+
+/**
+ * The only place in the app a comment is ever inserted as APPROVED
+ * directly — "set APPROVED at insert time in the app layer since the
+ * author is already an authenticated staff member" (the comments
+ * migration's own header). Always a reply to the comment staff is
+ * responding to, never a new top-level thread.
+ */
+export async function postPracticeReply(postId: string, parentCommentId: string, content: string) {
+  const { data: userData } = await supabase.auth.getUser();
+  const actor = userData.user;
+  if (!actor) return { data: null, error: new Error("Not signed in.") };
+
+  const { data: profileData } = await supabase
+    .from("profiles")
+    .select("full_name")
+    .eq("id", actor.id)
+    .single();
+
+  const { data, error } = await supabase
+    .from("comments")
+    .insert({
+      post_id: postId,
+      parent_comment_id: parentCommentId,
+      user_id: actor.id,
+      name: profileData?.full_name || "Dr Nogaga's Practice",
+      content,
+      status: "APPROVED",
+      is_practice_reply: true,
+    })
+    .select("*, posts(id, title, slug)")
+    .single();
+  if (data) await logAction("CREATE", "comments", data.id, { post_id: postId, is_practice_reply: true });
+  return { data, error };
+}
