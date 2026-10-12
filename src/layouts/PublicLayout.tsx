@@ -202,6 +202,12 @@ function Footer({
             <Link to="/privacy" className="hover:text-white">Privacy</Link>
             <Link to="/terms" className="hover:text-white">Terms</Link>
             <Link to="/disclaimer" className="hover:text-white">Medical Disclaimer</Link>
+            {/* Deliberately same size/weight as the legal links above, not
+                styled as a CTA — a quiet way in for staff (routes through
+                ProtectedRoute: straight to the dashboard if already signed
+                in, to /admin/login otherwise) without inviting patient
+                clicks. See PR discussion on CMS access, Oct 2026. */}
+            <Link to="/admin" className="hover:text-white">Staff</Link>
           </div>
           <span className="text-mist/70">
             Developed by{" "}
