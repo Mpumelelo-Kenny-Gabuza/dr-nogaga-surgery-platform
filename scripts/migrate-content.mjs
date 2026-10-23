@@ -1,0 +1,525 @@
+#!/usr/bin/env node
+// ============================================================================
+// Handover tool — copies the practice website's CONTENT and uploaded images
+// from one Supabase project (the developer's) into another (the practice's).
+//
+// What the SQL migrations already carry (apply them first: `npm run db:push`
+// against the NEW project): every table, RLS policy, function, the four
+// storage buckets and the seed content. What migrations CANNOT carry, and this
+// script does: anything edited through the CMS since seeding, the uploaded
+// image FILES in Storage, and the public image URLs stored in table rows —
+// those URLs contain the old project's address, so every one is rewritten to
+// the new project's address (otherwise every image would still point at the
+// old project and break the day it is deleted).
+//
+// What it deliberately does NOT copy:
+//   - staff accounts (profiles / auth.users) — the practice creates its own
+//   - enquiries, enquiry notes, comments, likes, audit log — patient/visitor
+//     data and test data stay out of the new project
+//
+// Safety rules baked in:
+//   * The OLD project is only ever READ. No write call to it exists in this file.
+//   * Default run is a read-only DRY RUN that prints exactly what would happen.
+//   * Writing needs --apply AND --confirm-target <new project ref>, typed by
+//     hand, so swapping the two sets of keys by mistake can't overwrite the source.
+//   * Refuses to touch a target that already holds enquiries (real patient data).
+//   * Safe to re-run: the target's content tables are replaced from the source.
+//
+// Usage (see HANDOVER.md for the full runbook):
+//   node scripts/migrate-content.mjs --env-file .env.migrate.local
+//   node scripts/migrate-content.mjs --env-file .env.migrate.local --apply --confirm-target <new-ref>
+//
+// Needs, in that env file or the environment (NEVER commit them):
+//   OLD_SUPABASE_URL, OLD_SUPABASE_SERVICE_KEY, NEW_SUPABASE_URL, NEW_SUPABASE_SERVICE_KEY
+// The service key is Supabase → Settings → API Keys → "service_role" (legacy
+// tab) or a "secret" key. It bypasses RLS: keep it out of git and chat, and
+// delete the env file when you are done.
+// ============================================================================
+import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
+
+const BUCKETS = ["public-assets", "blog-images", "gallery-images", "profile-images"];
+
+// Parents before children. `pk` is used for stable paging and for the
+// "delete everything" filter. `nullColumns` reference staff profiles, which are
+// not copied, so they are cleared (re-attribute afterwards — see HANDOVER.md).
+const TABLES = [
+  { name: "homepage_content", singleton: true },
+  { name: "about_content", singleton: true },
+  { name: "site_settings", singleton: true },
+  { name: "about_qualifications" },
+  { name: "about_affiliations" },
+  { name: "social_links" },
+  { name: "practice_locations" },
+  { name: "team_members" },
+  { name: "procedure_categories" },
+  { name: "procedures" },
+  { name: "procedure_images" },
+  { name: "faqs" },
+  { name: "procedure_faqs", pk: ["procedure_id", "faq_id"] },
+  { name: "post_categories" },
+  { name: "post_tags" },
+  { name: "posts", nullColumns: ["author_id"] },
+  { name: "post_tags_map", pk: ["post_id", "tag_id"] },
+  { name: "gallery_items" },
+  { name: "testimonials" },
+  { name: "media_assets", nullColumns: ["uploaded_by"] },
+];
+
+// Counted and reported, never copied.
+const LEFT_BEHIND = ["enquiries", "enquiry_notes", "comments", "post_likes", "audit_logs", "profiles"];
+
+const CHUNK = 50;
+
+// ----------------------------------------------------------------------------
+// Arguments and environment
+// ----------------------------------------------------------------------------
+function parseArgs(argv) {
+  const args = { apply: false, confirmTarget: null, envFile: null };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--apply") args.apply = true;
+    else if (a === "--confirm-target") args.confirmTarget = argv[++i] ?? "";
+    else if (a === "--env-file") args.envFile = argv[++i] ?? "";
+    else if (a === "--help" || a === "-h") args.help = true;
+    else fail(`Unknown option "${a}". Run with --help.`);
+  }
+  return args;
+}
+
+function loadEnvFile(path) {
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    fail(`Could not read env file "${path}".`);
+  }
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+function fail(message, extra) {
+  console.error(`\nERROR: ${message}`);
+  if (extra) console.error(`\n${extra}`);
+  console.error("");
+  process.exit(1);
+}
+
+function mustEnv(name) {
+  const value = process.env[name];
+  if (!value) fail(`${name} is not set (see --help).`);
+  return value;
+}
+
+const projectRef = (url) => new URL(url).hostname.split(".")[0];
+const stripSlash = (url) => url.replace(/\/+$/, "");
+
+function makeClient(url, key) {
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+}
+
+// ----------------------------------------------------------------------------
+// Reading
+// ----------------------------------------------------------------------------
+function describe(error) {
+  return [error.message, error.details, error.hint].filter(Boolean).join(" — ");
+}
+
+async function countRows(client, table) {
+  // A plain GET with limit 1, NOT `head: true`: supabase-js treats a body-less HEAD 404 as "no error, no rows",
+  // which would make a table that doesn't exist (migrations not applied) look like an empty one.
+  const { count, error, status, statusText } = await client.from(table).select("*", { count: "exact" }).limit(1);
+  if (error) {
+    const detail = describe(error) || `HTTP ${status} ${statusText}`.trim();
+    const hint =
+      status === 401 || status === 403
+        ? " (the service key was rejected — wrong key, or a key from a different project)"
+        : "";
+    throw new Error(`${table}: ${detail}${hint}`);
+  }
+  if (count === null) throw new Error(`${table}: the project did not return a row count`);
+  return count;
+}
+
+async function readAll(client, { name, pk = ["id"] }) {
+  const rows = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    let query = client.from(name).select("*");
+    for (const column of pk) query = query.order(column, { ascending: true });
+    const { data, error } = await query.range(from, from + PAGE - 1);
+    if (error) throw new Error(`${name}: ${describe(error)}`);
+    rows.push(...data);
+    if (data.length < PAGE) break;
+  }
+  return rows;
+}
+
+async function listBucket(client, bucket) {
+  const files = [];
+  async function walk(prefix) {
+    for (let offset = 0; ; offset += 100) {
+      const { data, error } = await client.storage
+        .from(bucket)
+        .list(prefix, { limit: 100, offset, sortBy: { column: "name", order: "asc" } });
+      if (error) throw new Error(`storage ${bucket}: ${describe(error)}`);
+      for (const item of data) {
+        const path = prefix ? `${prefix}/${item.name}` : item.name;
+        if (item.id === null) {
+          await walk(path); // a folder
+        } else if (item.name !== ".emptyFolderPlaceholder") {
+          files.push({
+            path,
+            size: Number(item.metadata?.size ?? 0),
+            mimetype: item.metadata?.mimetype ?? "application/octet-stream",
+          });
+        }
+      }
+      if (data.length < 100) break;
+    }
+  }
+  await walk("");
+  return files;
+}
+
+async function countAuthUsers(client) {
+  let total = 0;
+  for (let page = 1; ; page++) {
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw new Error(describe(error));
+    total += data.users.length;
+    if (data.users.length < 200) break;
+  }
+  return total;
+}
+
+// ----------------------------------------------------------------------------
+// URL rewriting
+// ----------------------------------------------------------------------------
+function makeRewriter(oldBase, newBase) {
+  const stats = { strings: 0 };
+  function rewrite(value) {
+    if (typeof value === "string") {
+      if (!value.includes(oldBase)) return value;
+      stats.strings++;
+      return value.split(oldBase).join(newBase);
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, rewrite(v)]));
+    }
+    return value;
+  }
+  return { rewrite, stats };
+}
+
+function* strings(value) {
+  if (typeof value === "string") yield value;
+  else if (Array.isArray(value)) for (const v of value) yield* strings(v);
+  else if (value && typeof value === "object") for (const v of Object.values(value)) yield* strings(v);
+}
+
+function hostHistogram(rowsByTable) {
+  const hosts = new Map();
+  for (const rows of rowsByTable.values()) {
+    for (const row of rows) {
+      for (const s of strings(row)) {
+        for (const match of s.matchAll(/https?:\/\/[^\s"'<>)\\]+/g)) {
+          try {
+            const host = new URL(match[0]).host;
+            hosts.set(host, (hosts.get(host) ?? 0) + 1);
+          } catch {
+            /* not a URL */
+          }
+        }
+      }
+    }
+  }
+  return hosts;
+}
+
+// ----------------------------------------------------------------------------
+// Writing (target only)
+// ----------------------------------------------------------------------------
+async function copyFiles(oldClient, newClient, bucket, files) {
+  let copied = 0;
+  for (const file of files) {
+    const { data: blob, error } = await oldClient.storage.from(bucket).download(file.path);
+    if (error) throw new Error(`download ${bucket}/${file.path}: ${describe(error)}`);
+    const body = Buffer.from(await blob.arrayBuffer());
+    const { error: upError } = await newClient.storage
+      .from(bucket)
+      .upload(file.path, body, { contentType: file.mimetype, upsert: true, cacheControl: "3600" });
+    if (upError) throw new Error(`upload ${bucket}/${file.path}: ${describe(upError)}`);
+    copied++;
+  }
+  return copied;
+}
+
+async function clearTable(client, { name, singleton, pk = ["id"] }) {
+  if (singleton) return; // single fixed row — upserted instead
+  const { error } = await client.from(name).delete().not(pk[0], "is", null);
+  if (error) throw new Error(`clearing ${name}: ${describe(error)}`);
+}
+
+async function writeRows(client, table, rows) {
+  if (rows.length === 0) return;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const { error } = table.singleton
+      ? await client.from(table.name).upsert(chunk, { onConflict: "id" })
+      : await client.from(table.name).insert(chunk);
+    if (error) throw new Error(`writing ${table.name}: ${describe(error)}`);
+  }
+}
+
+async function headOk(url) {
+  try {
+    let res = await fetch(url, { method: "HEAD" });
+    if (res.status === 405 || res.status === 501) res = await fetch(url);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Main
+// ----------------------------------------------------------------------------
+const pad = (value, width) => String(value).padEnd(width);
+const padNum = (value, width) => String(value).padStart(width);
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    console.log(
+      "Copies content + uploaded images from the OLD Supabase project to the NEW one.\n" +
+        "  --env-file <path>            read OLD_/NEW_ variables from a file\n" +
+        "  --apply                      actually write to the NEW project (default: read-only dry run)\n" +
+        "  --confirm-target <new-ref>   required with --apply; the NEW project's ref, typed by hand\n"
+    );
+    return;
+  }
+  if (args.envFile) loadEnvFile(args.envFile);
+
+  const oldUrl = stripSlash(mustEnv("OLD_SUPABASE_URL"));
+  const newUrl = stripSlash(mustEnv("NEW_SUPABASE_URL"));
+  const oldKey = mustEnv("OLD_SUPABASE_SERVICE_KEY");
+  const newKey = mustEnv("NEW_SUPABASE_SERVICE_KEY");
+
+  if (oldUrl === newUrl) fail("OLD_SUPABASE_URL and NEW_SUPABASE_URL are the same project.");
+  if (oldKey === newKey) fail("The OLD and NEW service keys are identical — one of them is wrong.");
+
+  const newRef = projectRef(newUrl);
+  const oldClient = makeClient(oldUrl, oldKey);
+  const newClient = makeClient(newUrl, newKey);
+
+  console.log(`\nSOURCE (read-only):  ${oldUrl}`);
+  console.log(`TARGET (the practice): ${newUrl}`);
+  console.log(args.apply ? "Mode: APPLY (will write to the target)\n" : "Mode: DRY RUN (nothing is written anywhere)\n");
+
+  if (args.apply && args.confirmTarget !== newRef) {
+    // Deliberately does NOT print the expected value: copy-pasting it would defeat the point.
+    // Typing the ref yourself, having just read which project the TARGET is, is the check.
+    fail(
+      args.confirmTarget
+        ? "--confirm-target does not match the TARGET project. Nothing was changed."
+        : "--apply also needs --confirm-target <ref>. Nothing was changed.",
+      `The TARGET above is ${newUrl}\n` +
+        "If that is the PRACTICE's project, pass its project ref (the part of the URL before .supabase.co) as " +
+        "--confirm-target. If it is your own project, the OLD_/NEW_ values are the wrong way round — stop and fix them."
+    );
+  }
+
+  // --- Preflight: both projects reachable, keys valid, schema applied ------
+  const sourceCounts = new Map();
+  const targetCounts = new Map();
+  try {
+    for (const table of TABLES) sourceCounts.set(table.name, await countRows(oldClient, table.name));
+  } catch (error) {
+    fail(
+      `Could not read the SOURCE project: ${error.message}\n` +
+        "Check OLD_SUPABASE_URL / OLD_SUPABASE_SERVICE_KEY, and that the source has all migrations applied."
+    );
+  }
+  try {
+    for (const table of TABLES) targetCounts.set(table.name, await countRows(newClient, table.name));
+  } catch (error) {
+    fail(
+      `Could not read the TARGET project: ${error.message}\n` +
+        "Check NEW_SUPABASE_URL / NEW_SUPABASE_SERVICE_KEY, and that you have already applied the migrations to the target (npm run db:push)."
+    );
+  }
+
+  const targetEnquiries = await countRows(newClient, "enquiries");
+  if (targetEnquiries > 0) {
+    fail(
+      `The TARGET already holds ${targetEnquiries} patient enquiries. This tool will not touch a project that ` +
+        "is already in use — nothing was changed."
+    );
+  }
+
+  // --- Report --------------------------------------------------------------
+  console.log("CONTENT TABLES");
+  console.log(`  ${pad("table", 24)}${padNum("source", 8)}${padNum("target now", 12)}`);
+  for (const table of TABLES) {
+    console.log(`  ${pad(table.name, 24)}${padNum(sourceCounts.get(table.name), 8)}${padNum(targetCounts.get(table.name), 12)}`);
+  }
+  console.log("  (the target's current rows — normally just the migration seed content — are replaced by the source's)\n");
+
+  const filesByBucket = new Map();
+  for (const bucket of BUCKETS) filesByBucket.set(bucket, await listBucket(oldClient, bucket));
+  const totalFiles = [...filesByBucket.values()].reduce((n, f) => n + f.length, 0);
+  const totalBytes = [...filesByBucket.values()].flat().reduce((n, f) => n + f.size, 0);
+  console.log("UPLOADED FILES (Storage)");
+  for (const bucket of BUCKETS) console.log(`  ${pad(bucket, 18)}${padNum(filesByBucket.get(bucket).length, 5)} files`);
+  console.log(`  total ${totalFiles} files, ${(totalBytes / 1024 / 1024).toFixed(2)} MB\n`);
+
+  const rowsByTable = new Map();
+  for (const table of TABLES) rowsByTable.set(table.name, await readAll(oldClient, table));
+  const hosts = hostHistogram(rowsByTable);
+  console.log("WHERE LINKED IMAGES/URLS POINT (host → occurrences)");
+  if (hosts.size === 0) console.log("  (no absolute URLs in the content)");
+  for (const [host, n] of [...hosts.entries()].sort((a, b) => b[1] - a[1])) {
+    const note = host === new URL(oldUrl).host ? "  ← the old project: rewritten to the new one" : "";
+    console.log(`  ${pad(host, 44)}${padNum(n, 4)}${note}`);
+  }
+  console.log("");
+
+  console.log("NOT COPIED (by design) — counts in the SOURCE");
+  for (const name of LEFT_BEHIND) {
+    try {
+      console.log(`  ${pad(name, 18)}${padNum(await countRows(oldClient, name), 6)}`);
+    } catch (error) {
+      console.log(`  ${pad(name, 18)}  (could not count: ${error.message})`);
+    }
+  }
+  try {
+    console.log(`  ${pad("login accounts", 18)}${padNum(await countAuthUsers(oldClient), 6)}   (the practice creates its own — see HANDOVER.md)`);
+  } catch (error) {
+    console.log(`  ${pad("login accounts", 18)}  (could not count: ${error.message})`);
+  }
+  console.log("");
+
+  if (!args.apply) {
+    console.log("Dry run finished. Nothing was written.");
+    console.log("To copy for real, re-run the same command with:  --apply --confirm-target <ref>");
+    console.log("where <ref> is the PRACTICE project's ref — the part of the TARGET URL above before .supabase.co.\n");
+    return;
+  }
+
+  // --- Apply ---------------------------------------------------------------
+  const { rewrite, stats } = makeRewriter(oldUrl, newUrl);
+  const prepared = new Map();
+  for (const table of TABLES) {
+    const rows = rowsByTable.get(table.name).map((row) => {
+      const next = { ...row };
+      for (const column of table.nullColumns ?? []) next[column] = null;
+      return rewrite(next);
+    });
+    prepared.set(table.name, rows);
+  }
+
+  // Files first, so no row is ever live pointing at an image that isn't there yet.
+  console.log("Copying files…");
+  for (const bucket of BUCKETS) {
+    const files = filesByBucket.get(bucket);
+    const n = await copyFiles(oldClient, newClient, bucket, files);
+    console.log(`  ${bucket}: ${n} file(s)`);
+  }
+
+  console.log("Replacing the target's content tables…");
+  for (const table of [...TABLES].reverse()) await clearTable(newClient, table);
+  for (const table of TABLES) {
+    await writeRows(newClient, table, prepared.get(table.name));
+    console.log(`  ${pad(table.name, 24)}${padNum(prepared.get(table.name).length, 5)} row(s)`);
+  }
+  console.log(`  (${stats.strings} text value(s) had the old project's address rewritten)\n`);
+
+  // --- Verify the result against reality, not against what we meant to do ---
+  console.log("Verifying…");
+  let problems = 0;
+
+  for (const table of TABLES) {
+    const actual = await countRows(newClient, table.name);
+    const expected = prepared.get(table.name).length;
+    if (actual !== expected) {
+      problems++;
+      console.log(`  ✗ ${table.name}: target has ${actual} rows, expected ${expected}`);
+    }
+  }
+
+  for (const bucket of BUCKETS) {
+    const want = filesByBucket.get(bucket);
+    const have = new Map((await listBucket(newClient, bucket)).map((f) => [f.path, f]));
+    for (const file of want) {
+      const got = have.get(file.path);
+      if (!got) {
+        problems++;
+        console.log(`  ✗ missing in target: ${bucket}/${file.path}`);
+      } else if (got.size !== file.size) {
+        problems++;
+        console.log(`  ✗ size differs: ${bucket}/${file.path} (${file.size} → ${got.size})`);
+      }
+    }
+  }
+
+  const publicPrefix = `${newUrl}/storage/v1/object/public/`;
+  const urlPattern = new RegExp(`${publicPrefix.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}[^\\s"'<>)\\\\]+`, "g");
+  const urls = new Set();
+  for (const rows of prepared.values()) {
+    for (const row of rows) for (const s of strings(row)) for (const m of s.matchAll(urlPattern)) urls.add(m[0]);
+  }
+  // A Storage link that still points at ANY other project (typically the old one, if OLD_SUPABASE_URL was
+  // typed differently from how the URLs were stored) works today and breaks the day that project is deleted.
+  const foreignStorage = new Set();
+  for (const rows of prepared.values()) {
+    for (const row of rows) {
+      for (const s of strings(row)) {
+        for (const m of s.matchAll(/https?:\/\/[^\s"'<>)\\]+\/storage\/v1\/object\/public\/[^\s"'<>)\\]*/g)) {
+          if (!m[0].startsWith(publicPrefix)) foreignStorage.add(m[0]);
+        }
+      }
+    }
+  }
+  for (const url of foreignStorage) {
+    problems++;
+    console.log(`  ✗ image link still points at a different Storage host (not rewritten): ${url}`);
+  }
+
+  let broken = 0;
+  for (const url of urls) {
+    if (!(await headOk(url))) {
+      broken++;
+      console.log(`  ✗ image link does not load: ${url}`);
+    }
+  }
+  problems += broken;
+  console.log(`  ${urls.size} image link(s) in the content checked against the new project, ${broken} broken.`);
+
+  if (problems > 0) {
+    console.log(`\nFINISHED WITH ${problems} PROBLEM(S) — see ✗ lines above. The source project was not modified.\n`);
+    process.exit(2);
+  }
+  console.log("\nAll checks passed. The source project was not modified.\n");
+  console.log("Next: create the practice's staff logins, then re-attribute blog posts (see HANDOVER.md).\n");
+}
+
+main().catch((error) => {
+  console.error(`\nERROR: ${error.message}`);
+  console.error("The OLD project is never written to by this tool. If this happened during --apply, the target may be");
+  console.error("partly filled; fix the cause and run the same command again (it replaces the target's content each time).\n");
+  process.exit(1);
+});

@@ -39,4 +39,9 @@ export default [
       "no-undef": "off", // TS + its own resolver already cover this; avoids JSX false positives
     },
   },
+  {
+    // Node scripts (one-off tooling, never bundled into the site) — Node globals, not browser ones.
+    files: ["scripts/**/*.mjs"],
+    languageOptions: { ecmaVersion: 2022, sourceType: "module", globals: globals.node },
+  },
 ];
