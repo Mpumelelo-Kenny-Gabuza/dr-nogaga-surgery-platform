@@ -121,6 +121,32 @@ function mustEnv(name) {
   return value;
 }
 
+// A key with only "visitor" power would not fail loudly: reading with it silently skips drafts and anything RLS
+// hides from the public, and the copy would then replace the practice's content with that incomplete subset.
+// So refuse it up front, before a single request is made.
+function checkServiceKey(name, key) {
+  const where = "Find it under Project Settings → API Keys → Secret keys (sb_secret_…), or the Legacy tab → service_role.";
+  if (key.startsWith("sb_publishable_")) {
+    fail(
+      `${name} is a PUBLISHABLE key (sb_publishable_…). This tool needs the project's SECRET key (sb_secret_…) or the ` +
+        "legacy service_role key. A publishable key only sees what a website visitor can see, so the copy would miss " +
+        "drafts and unpublished content.",
+      where
+    );
+  }
+  const parts = key.split(".");
+  if (parts.length === 3) {
+    try {
+      const role = JSON.parse(Buffer.from(parts[1], "base64url").toString()).role;
+      if (role && role !== "service_role") {
+        fail(`${name} is a key for the "${role}" role, not "service_role". It can't see everything this tool needs to copy.`, where);
+      }
+    } catch {
+      /* not a readable JWT — let the server judge it */
+    }
+  }
+}
+
 const projectRef = (url) => new URL(url).hostname.split(".")[0];
 const stripSlash = (url) => url.replace(/\/+$/, "");
 
@@ -318,6 +344,8 @@ async function main() {
   const newUrl = stripSlash(mustEnv("NEW_SUPABASE_URL"));
   const oldKey = mustEnv("OLD_SUPABASE_SERVICE_KEY");
   const newKey = mustEnv("NEW_SUPABASE_SERVICE_KEY");
+  checkServiceKey("OLD_SUPABASE_SERVICE_KEY", oldKey);
+  checkServiceKey("NEW_SUPABASE_SERVICE_KEY", newKey);
 
   if (oldUrl === newUrl) fail("OLD_SUPABASE_URL and NEW_SUPABASE_URL are the same project.");
   if (oldKey === newKey) fail("The OLD and NEW service keys are identical — one of them is wrong.");
@@ -389,6 +417,21 @@ async function main() {
 
   const rowsByTable = new Map();
   for (const table of TABLES) rowsByTable.set(table.name, await readAll(oldClient, table));
+  // media_assets is a registry of uploads. A row whose file is no longer in Storage (deleted from the dashboard,
+  // say) is stale: copying it would create a registry entry and a URL that can never load. Content tables are
+  // different — a dangling reference there is a genuinely broken image and is reported, not hidden.
+  const sourcePaths = new Set();
+  for (const bucket of BUCKETS) for (const f of filesByBucket.get(bucket)) sourcePaths.add(`${bucket}/${f.path}`);
+  const staleMedia = rowsByTable.get("media_assets").filter((r) => !sourcePaths.has(`${r.bucket}/${r.path}`));
+  console.log("MEDIA REGISTRY (media_assets)");
+  console.log(
+    `  ${rowsByTable.get("media_assets").length} row(s); ${staleMedia.length} point at files that are no longer in Storage` +
+      (staleMedia.length ? " → skipped as stale" : "")
+  );
+  for (const r of staleMedia.slice(0, 5)) console.log(`    e.g. ${r.bucket}/${r.path}  (registered ${String(r.created_at).slice(0, 10)})`);
+  if (staleMedia.length > 5) console.log(`    … and ${staleMedia.length - 5} more`);
+  console.log("");
+
   const hosts = hostHistogram(rowsByTable);
   console.log("WHERE LINKED IMAGES/URLS POINT (host → occurrences)");
   if (hosts.size === 0) console.log("  (no absolute URLs in the content)");
@@ -424,7 +467,11 @@ async function main() {
   const { rewrite, stats } = makeRewriter(oldUrl, newUrl);
   const prepared = new Map();
   for (const table of TABLES) {
-    const rows = rowsByTable.get(table.name).map((row) => {
+    const source =
+      table.name === "media_assets"
+        ? rowsByTable.get(table.name).filter((row) => !staleMedia.includes(row))
+        : rowsByTable.get(table.name);
+    const rows = source.map((row) => {
       const next = { ...row };
       for (const column of table.nullColumns ?? []) next[column] = null;
       return rewrite(next);
